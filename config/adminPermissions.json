@@ -1,0 +1,20 @@
+{
+  "Master": [
+    "documentos",
+    "admins",
+    "fisioterapeutas",
+    "pacientes",
+    "disputas",
+    "suporte",
+    "parametros",
+    "pontuacao",
+    "relatorios",
+    "relatorios-financeiros",
+    "relatorios-plataforma"
+  ],
+  "Suporte": [
+    "documentos",
+    "disputas",
+    "suporte"
+  ]
+}
