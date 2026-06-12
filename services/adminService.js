@@ -3,6 +3,7 @@ import { sql } from '../config/dbConfig.js';
 import fs from 'fs';
 import path from 'path';
 import { queryWithContext } from './_queryWithContext.js';
+import notificacoesDispatch from './notificacoesDispatch.js';
 import { HttpError } from '../utils/httpError.js';
 
 const YOUTUBE_RE = /^https?:\/\/(www\.)?(youtube\.com\/(watch\?v=|embed\/|shorts\/)|youtu\.be\/).+/i;
@@ -1264,6 +1265,8 @@ const adminService = {
           mensagemIndicacao = 'Não foi possível atualizar a indicação automaticamente.';
         }
       }
+
+      void notificacoesDispatch.crefitoAprovado({ fisioterapeutaId: fisioId });
 
       if (mensagemIndicacao === 'Nenhuma indicação pendente encontrada.') {
         return `CREFITO do fisioterapeuta ${fisioId} aprovado com sucesso. Nenhuma indicação pendente encontrada.`;

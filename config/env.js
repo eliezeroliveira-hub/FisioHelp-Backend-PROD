@@ -61,9 +61,10 @@ const asaasWebhookToken = requiredInProduction('ASAAS_WEBHOOK_TOKEN');
 const asaasWithdrawalWebhookToken = optionalEnv('ASAAS_WITHDRAWAL_WEBHOOK_TOKEN') ?? asaasWebhookToken;
 
 const pushProviderMode = String(process.env.PUSH_PROVIDER_MODE || 'stub').trim().toLowerCase();
-if (!['stub', 'fcm', 'apns'].includes(pushProviderMode)) {
-  throw new Error('PUSH_PROVIDER_MODE inválido. Use stub, fcm ou apns.');
+if (!['stub', 'expo', 'fcm', 'apns'].includes(pushProviderMode)) {
+  throw new Error('PUSH_PROVIDER_MODE inválido. Use stub, expo, fcm ou apns.');
 }
+const expoPushAccessToken = optionalEnv('EXPO_PUSH_ACCESS_TOKEN');
 
 const refreshTokenDays = parsePositiveIntEnv('REFRESH_TOKEN_DAYS', 30);
 
@@ -114,6 +115,7 @@ export const ENV = {
 
   // Push notifications
   PUSH_PROVIDER_MODE: pushProviderMode,
+  EXPO_PUSH_ACCESS_TOKEN: expoPushAccessToken,
   NOTIF_WORKER_ENABLED: process.env.NOTIF_WORKER_ENABLED,
   NOTIF_WORKER_INTERVAL_MS: process.env.NOTIF_WORKER_INTERVAL_MS,
   NOTIF_WORKER_STALE_MINUTES: process.env.NOTIF_WORKER_STALE_MINUTES,

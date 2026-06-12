@@ -156,13 +156,6 @@ router.post(
   consultasController.validarToken
 );
 
-
-router.post(
-  '/:id/finalizar',
-  verificarPermissao(['Fisioterapeuta']),
-  consultasController.finalizar
-);
-
 router.patch(
   '/:id/observacoes',
   verificarPermissao(['Fisioterapeuta']),

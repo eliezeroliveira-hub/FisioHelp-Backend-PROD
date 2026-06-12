@@ -3,6 +3,7 @@ import { sql } from '../config/dbConfig.js';
 import { queryWithContext } from './_queryWithContext.js';
 import { reconciliarCreditoPacoteDisponivelPorConsulta } from './_reconciliarCreditoPacoteDisponivel.js';
 import reembolsosGatewayFilaService from './reembolsosGatewayFilaService.js';
+import notificacoesDispatch from './notificacoesDispatch.js';
 import { HttpError } from '../utils/httpError.js';
 
 const STATUS_FINAIS = ['ProcedentePaciente', 'ProcedenteFisio', 'Cancelada'];
@@ -474,9 +475,14 @@ const r = await queryWithContext(
   `
 );
 
-
   // Retorna o payload da SP (quando existir), mantendo compatibilidade.
-  return r?.recordset?.[0] ?? { sucesso: true, mensagem: 'Disputa aberta com sucesso.' };
+  const retorno = r?.recordset?.[0] ?? { sucesso: true, mensagem: 'Disputa aberta com sucesso.' };
+  void notificacoesDispatch.disputaAberta({
+    disputaId: retorno?.DisputaId ?? retorno?.Id,
+    consultaId
+  });
+
+  return retorno;
 },
 
 
@@ -522,6 +528,11 @@ const r = await queryWithContext(
     }
 
     const row = result.recordset?.[0] ?? null;
+
+    void notificacoesDispatch.disputaAtualizada({
+      disputaId: row?.Id ?? disputaId,
+      status: row?.Status ?? 'EmAnalise'
+    });
 
     return {
       sucesso: true,
@@ -696,6 +707,11 @@ const r = await queryWithContext(
         await reconciliarCreditoPacoteDisponivelPorConsulta(consultaId, usuario);
       }
     }
+
+    void notificacoesDispatch.disputaAtualizada({
+      disputaId,
+      status: novoStatus
+    });
 
     return { sucesso: true, mensagem: `Disputa ${disputaId} resolvida como ${novoStatus}.` };
   }

@@ -5,6 +5,7 @@ import { queryWithContext } from './_queryWithContext.js';
 import { HttpError } from '../utils/httpError.js';
 import { ENV } from '../config/env.js';
 import { asaasClient } from './asaasClient.js';
+import notificacoesDispatch from './notificacoesDispatch.js';
 import { isValidCPF, isValidEmail } from '../utils/identityValidators.js';
 
 const ASAAS_PACOTE_MAX_PARCELAS = 10;
@@ -453,6 +454,18 @@ const pagamentosGatewayService = {
 
     const row = result?.recordset?.[0] ?? { TransacaoId: id };
     const autoConfirmacao = await aplicarAutoConfirmacaoConsulta(ctx, row);
+
+    void notificacoesDispatch.pagamentoConfirmadoConsulta({
+      transacaoId: id,
+      consultaId: row?.ConsultaId
+    });
+    void notificacoesDispatch.consultaAgendada({
+      consultaId: row?.ConsultaId,
+      notificarPaciente: false
+    });
+    if (autoConfirmacao?.AutoConfirmacaoOk) {
+      void notificacoesDispatch.consultaConfirmada({ consultaId: row?.ConsultaId });
+    }
 
     return {
       ...row,
@@ -913,6 +926,18 @@ const pagamentosGatewayService = {
 
     const autoConfirmacao = await aplicarAutoConfirmacaoConsulta(ctx, row);
 
+    void notificacoesDispatch.pagamentoConfirmadoConsulta({
+      transacaoId: id,
+      consultaId: row?.ConsultaId
+    });
+    void notificacoesDispatch.consultaAgendada({
+      consultaId: row?.ConsultaId,
+      notificarPaciente: false
+    });
+    if (autoConfirmacao?.AutoConfirmacaoOk) {
+      void notificacoesDispatch.consultaConfirmada({ consultaId: row?.ConsultaId });
+    }
+
     return {
       ...row,
       ...autoConfirmacao
@@ -1038,6 +1063,8 @@ const pagamentosGatewayService = {
       metodoPagamento: metodo,
       gatewayValorLiquidoReal,
     }, ctx);
+
+    void notificacoesDispatch.pagamentoConfirmadoPacote({ pacoteId: id });
 
     return result?.recordset?.[0] ?? { PacoteId: id, Status: 'Ativo' };
   },
@@ -1394,7 +1421,7 @@ const pagamentosGatewayService = {
       throw new HttpError(400, 'PacoteId inválido.');
     }
 
-    return this.atualizarGatewayReembolsoPacoteAsaas({
+    const atualizado = await this.atualizarGatewayReembolsoPacoteAsaas({
       pacoteId: id,
       paymentId,
       installmentId,
@@ -1406,6 +1433,10 @@ const pagamentosGatewayService = {
       event: event ?? 'PAYMENT_REFUNDED',
       confirmado: true,
     }, ctx);
+
+    await notificacoesDispatch.reembolsoPacoteConcluido({ pacoteId: id });
+
+    return atualizado;
   },
 
   async solicitarReembolsoPacoteAsaas({ pacoteId, valor = null, motivo = null } = {}, usuario) {
@@ -1506,6 +1537,8 @@ const pagamentosGatewayService = {
       solicitado: true,
     }, ctx);
 
+    await notificacoesDispatch.reembolsoPacoteSolicitado({ pacoteId: row.PacoteId });
+
     if (isPacoteRefundConfirmado(null, refundInfoPacote)) {
       await this.aplicarReembolsoPacoteAsaasConfirmado({
         pacoteId: row.PacoteId,
@@ -1553,7 +1586,7 @@ const pagamentosGatewayService = {
 
     if (String(event ?? '').trim().toUpperCase() === 'PAYMENT_REFUND_DENIED') {
       const denialReason = denialReasonFromAdditionalInfo(additionalInfo);
-      return this.atualizarGatewayReembolsoPacoteAsaas({
+      const atualizado = await this.atualizarGatewayReembolsoPacoteAsaas({
         pacoteId: id,
         paymentId,
         installmentId,
@@ -1562,6 +1595,13 @@ const pagamentosGatewayService = {
         event,
         erroMensagem: denialReason ?? refundInfo?.description ?? 'Estorno negado pelo Asaas.',
       }, ctx);
+
+      await notificacoesDispatch.reembolsoPacoteNegado({
+        pacoteId: id,
+        motivo: denialReason ?? refundInfo?.description ?? 'Estorno negado pelo Asaas.'
+      });
+
+      return atualizado;
     }
 
     return this.atualizarGatewayReembolsoPacoteAsaas({

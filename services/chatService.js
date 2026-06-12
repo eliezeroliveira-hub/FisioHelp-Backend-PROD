@@ -2,6 +2,7 @@
 import { sql } from '../config/dbConfig.js';
 import { queryWithContext } from './_queryWithContext.js';
 import moderateChatMessage from './chatModerationService.js';
+import notificacoesDispatch from './notificacoesDispatch.js';
 import { HttpError } from '../utils/httpError.js';
 
 const asTipo = (u) => String(u?.tipo || '').toLowerCase();
@@ -492,6 +493,13 @@ const chatService = {
     );
 
     const msgId = insert.recordset?.[0]?.Id;
+    void notificacoesDispatch.chatNovaMensagem({
+      consultaId: Number(consulta.Id),
+      mensagemId: msgId,
+      remetenteTipo: tipoRemetente,
+      conteudo: conteudoFinal
+    });
+
     return { sucesso: true, mensagemId: msgId };
   },
 

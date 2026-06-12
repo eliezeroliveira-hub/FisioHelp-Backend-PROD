@@ -325,7 +325,7 @@ const consultasController = {
   async atualizar(_req, res) {
     return res.status(405).json({
       sucesso: false,
-      erro: 'Operação não permitida. Use endpoints de ação (confirmar/cancelar/finalizar/observacoes/comparecimento/validar-token).'
+      erro: 'Operação não permitida. Use endpoints de ação (confirmar/cancelar/observacoes/comparecimento/validar-token).'
     });
   },
 
@@ -433,21 +433,6 @@ const consultasController = {
     } catch (erro) {
       log('error', 'Erro ao cancelar consulta', { erro: erro.message });
       return handleError(res, erro, 'Falha ao cancelar consulta.');
-    }
-  },
-
-  /**
-   * POST /consultas/:id/finalizar
-   */
-  async finalizar(req, res) {
-    try {
-      const usuario = requireUsuario(req, res);
-      if (!usuario) return;
-
-      const consulta = await consultasService.finalizar(req.params.id, req.body, usuario);
-      return res.json({ sucesso: true, consulta });
-    } catch (erro) {
-      return handleError(res, erro);
     }
   },
 

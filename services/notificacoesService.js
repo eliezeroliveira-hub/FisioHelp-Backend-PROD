@@ -8,7 +8,15 @@ import { queryWithContext } from './_queryWithContext.js';
 const USUARIOS_VALIDOS = new Set(['Paciente', 'Fisioterapeuta']);
 const PLATAFORMAS_VALIDAS = new Set(['ios', 'android']);
 const CANAIS_VALIDOS = new Set(['push', 'email']);
-const TIPOS_VALIDOS = new Set(['Promocao', 'Chat', 'Pagamento', 'Agendamento']);
+const TIPOS_VALIDOS = new Set([
+  'Promocao',
+  'Chat',
+  'Pagamento',
+  'Agendamento',
+  'Disputa',
+  'Chamado',
+  'Credenciamento'
+]);
 
 function contextoSistema() {
   return { tipo: 'Admin', id: Number(ENV.SYSTEM_ADMIN_ID ?? 1) };

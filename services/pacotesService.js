@@ -3,6 +3,7 @@
 import { sql } from '../config/dbConfig.js';
 import { queryWithContext } from './_queryWithContext.js';
 import { registrarCancelamentoLog } from './cancelamentosLogService.js';
+import notificacoesDispatch from './notificacoesDispatch.js';
 import reembolsosGatewayFilaService from './reembolsosGatewayFilaService.js';
 import { HttpError } from '../utils/httpError.js';
 import { log } from '../config/logger.js';
@@ -1096,6 +1097,8 @@ const pacotesService = {
       observacao: observacaoUsuario,
       origemAcao: 'pacotes.cancelar',
     });
+
+    void notificacoesDispatch.pacoteCancelado({ pacoteId: id });
 
     if (opcaoReembolso === 'Reembolso') {
       try {

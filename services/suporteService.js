@@ -10,6 +10,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { sql } from '../config/dbConfig.js';
 import { queryWithContext } from './_queryWithContext.js';
+import notificacoesDispatch from './notificacoesDispatch.js';
 import { HttpError } from '../utils/httpError.js';
 
 function requireUser(usuario) {
@@ -542,6 +543,10 @@ const suporteService = {
         files: arquivos,
       });
 
+      void notificacoesDispatch.chamadoAberto({
+        chamadoId: Number(resultado.ChamadoId || 0)
+      });
+
       return { ...resultado, Anexos: anexosInseridos };
     } catch (err) {
       await cleanupUploadedTempFiles(arquivos);
@@ -617,6 +622,10 @@ const suporteService = {
         usuario,
         chamadoId: Number(resultado.ChamadoId || 0),
         files: arquivos,
+      });
+
+      void notificacoesDispatch.chamadoAberto({
+        chamadoId: Number(resultado.ChamadoId || resultado.Id || 0)
       });
 
       return { ...resultado, Anexos: anexosInseridos };
@@ -722,6 +731,11 @@ const suporteService = {
       throw new HttpError(409, 'O status do chamado foi alterado por outra operação. Recarregue e tente novamente.');
     }
 
+    void notificacoesDispatch.chamadoAtualizado({
+      chamadoId: id,
+      status: statusFinal
+    });
+
     return { chamadoId: id, status: statusFinal };
   },
 
@@ -801,4 +815,3 @@ const suporteService = {
 };
 
 export default suporteService;
-

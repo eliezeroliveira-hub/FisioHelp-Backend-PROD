@@ -92,7 +92,7 @@ export function startNotificacoesWorker() {
   }
 
   if (ENV.NODE_ENV === 'production' && !isProviderReal) {
-    log('error', 'Worker de notificações abortado: PUSH_PROVIDER_MODE=stub em produção. Defina fcm ou apns.');
+    log('error', 'Worker de notificações abortado: PUSH_PROVIDER_MODE=stub em produção. Defina expo, fcm ou apns.');
     return null;
   }
 

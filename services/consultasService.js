@@ -5,6 +5,7 @@ import { queryWithContext } from './_queryWithContext.js';
 import { registrarCancelamentoLog } from './cancelamentosLogService.js';
 import { reconciliarCreditoPacoteDisponivelPorConsulta } from './_reconciliarCreditoPacoteDisponivel.js';
 import reembolsosGatewayFilaService from './reembolsosGatewayFilaService.js';
+import notificacoesDispatch from './notificacoesDispatch.js';
 import {
   obterPendenciaAvaliacaoFisioterapeuta,
   obterPendenciaAvaliacaoPaciente,
@@ -1120,6 +1121,8 @@ async function tentarAutoConfirmarConsultaAposPagamento(usuario, consultaId) {
         @ConsultaId = @ConsultaId,
         @FisioterapeutaId = @FisioterapeutaId;
     `);
+
+    void notificacoesDispatch.consultaConfirmada({ consultaId: Number(consultaId) });
   } catch (err) {
     log('warn', '[autoConfirm] Falhou', { consultaId, erro: err?.message || err });
   }
@@ -2312,8 +2315,12 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
           ConfirmadaPor: consulta.ConfirmadaPor ?? null,
           ConfirmadaEm: consulta.ConfirmadaEm ?? null,
           EspecialidadeId: consulta.EspecialidadeId ?? null
-        }
+      }
       : consulta;
+
+    if (String(consultaOut.StatusPagamento || '').trim() === 'Pago') {
+      void notificacoesDispatch.consultaAgendada({ consultaId: novoId });
+    }
 
     return { sucesso: true, consulta: consultaOut };
   },
@@ -2733,6 +2740,11 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
     await tentarAutoConfirmarConsultaAposPagamento(usuario, consultaId);
     const consulta = await this.buscarPorId(consultaId, usuario);
 
+    if (metodo !== 'Plataforma') {
+      void notificacoesDispatch.consultaAgendada({ consultaId });
+      void notificacoesDispatch.pagamentoConfirmadoConsulta({ consultaId });
+    }
+
     const mensagens = {
       Credito: 'Consulta criada e paga com créditos da carteira.',
       Pacote: 'Consulta criada e vinculada a um pacote ativo.',
@@ -2802,6 +2814,8 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
 
     const retorno = result?.recordset?.[0] ?? null;
     const consulta = await this.buscarPorId(consultaId, usuario);
+
+    void notificacoesDispatch.consultaConfirmada({ consultaId });
 
     return { consulta, retorno };
   },
@@ -2893,6 +2907,8 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
       observacao: 'Fluxo: cancelamento direto do paciente para consulta nao paga.',
       origemAcao: 'consultas.cancelar.paciente',
     });
+
+    void notificacoesDispatch.consultaCancelada({ consultaId: id, motivo });
 
     return {
       consulta,
@@ -3002,6 +3018,8 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
       origemAcao: 'consultas.cancelar.fisioterapeuta',
     });
 
+    void notificacoesDispatch.fisioterapeutaAusente({ consultaId: id });
+
     return {
       consulta,
       retorno: {
@@ -3042,44 +3060,10 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
     origemAcao: 'consultas.cancelar.admin',
   });
 
+  void notificacoesDispatch.consultaCancelada({ consultaId: id, motivo });
+
   return { consulta, retorno: null };
 },
-
-
-  async finalizar(id, body, usuario) {
-    const consultaId = assertId(id, 'Id de consulta');
-
-    requireUser(usuario);
-    if (!isAdmin(usuario)) throw new HttpError(403, 'Acesso negado.');
-
-    const existente = await this.buscarPorId(consultaId, usuario);
-    if (!existente) throw new HttpError(404, 'Consulta não encontrada ou sem permissão.');
-
-    if (String(existente.Status) !== STATUS.CONFIRMADA) {
-      throw new HttpError(409, `Só finaliza quando estiver Confirmada. Status atual: ${existente.Status}`);
-    }
-
-    const motivo = normalizeText(
-      body?.MotivoEncerramento ?? body?.motivoEncerramento ?? 'Concluída via API',
-      400
-    );
-
-    await queryWithContext(usuario, (req) => {
-      req.input('Id', sql.Int, consultaId);
-      req.input('Motivo', sql.NVarChar(400), motivo);
-      req.input('StatusConcluida', sql.NVarChar(30), STATUS.CONCLUIDA);
-      req.input('StatusConfirmada', sql.NVarChar(30), STATUS.CONFIRMADA);
-    }, `
-      UPDATE dbo.Consultas
-      SET Status = @StatusConcluida,
-          ConfirmacaoAtendimento = 1,
-          DataEncerramento = SYSDATETIME(),
-          MotivoEncerramento = @Motivo
-      WHERE Id = @Id AND Status = @StatusConfirmada;
-    `);
-
-    return await this.buscarPorId(consultaId, usuario);
-  },
 
   async definirObservacoes(id, body, usuario) {
     requireUser(usuario);
@@ -3181,6 +3165,7 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
   tokenGeradoEm = formatSqlLocalDateTime(row?.TokenGeradoEm ?? row?.tokenGeradoEm ?? null);
 
   const consultaAtualizada = await this.buscarPorId(consultaId, usuario);
+  void notificacoesDispatch.tokenConsultaGerado({ consultaId });
 
   // mantém compatibilidade: pode retornar a consulta direto ou {consulta, tokenExpiraEm}
   return tokenExpiraEm
@@ -3255,6 +3240,14 @@ async reagendar(consultaId, body, usuario) {
   `);
 
   const res = r?.recordset?.[0];
+  const consultaNotificacaoId = Number(res?.NovaConsultaId ?? res?.ConsultaId ?? cid);
+  if (Number.isInteger(consultaNotificacaoId) && consultaNotificacaoId > 0 && res?.Sucesso !== false) {
+    void notificacoesDispatch.consultaReagendada({
+      consultaId: consultaNotificacaoId,
+      consultaOriginalId: cid,
+      dataHoraAnterior: c.DataHora
+    });
+  }
 
   // Compatibilidade:
   // - fluxo antigo: retorna { ConsultaId, DataHoraAnterior, DataHoraNova }
@@ -3341,6 +3334,8 @@ async reagendar(consultaId, body, usuario) {
         observacao: 'Fluxo: cancelarArrependimento7Dias | credito livre',
         origemAcao: 'consultas.cancelarArrependimento7Dias.creditoLivre',
       });
+
+      void notificacoesDispatch.consultaCancelada({ consultaId: cid, motivo });
 
       return {
         Sucesso: row?.Sucesso ?? true,
@@ -3429,6 +3424,8 @@ async reagendar(consultaId, body, usuario) {
         origemAcao: 'consultas.cancelarArrependimento7Dias.reembolsoAsaas',
       });
 
+      void notificacoesDispatch.consultaCancelada({ consultaId: cid, motivo });
+
       return {
         Sucesso: row?.Sucesso ?? true,
         ConsultaId: row?.ConsultaId ?? cid,
@@ -3498,6 +3495,8 @@ async reagendar(consultaId, body, usuario) {
       observacao: `Fluxo: cancelarArrependimento7Dias | OpcaoReembolso=${opcaoReembolso}`,
       origemAcao: 'consultas.cancelarArrependimento7Dias',
     });
+
+      void notificacoesDispatch.consultaCancelada({ consultaId: cid, motivo });
 
       return {
       Sucesso: row?.Sucesso ?? true,
@@ -4712,6 +4711,8 @@ async decidirNoShowFisio(id, body, usuario) {
     await tentarAutoConfirmarConsultaAposPagamento(usuario, consultaId);
 
     const consultaAtualizada = await this.buscarPorId(consultaId, usuario);
+    void notificacoesDispatch.pagamentoConfirmadoConsulta({ consultaId });
+
     return { consulta: consultaAtualizada, retorno };
   },
 
@@ -4753,6 +4754,7 @@ async decidirNoShowFisio(id, body, usuario) {
     await tentarAutoConfirmarConsultaAposPagamento(usuario, consultaId);
 
     const consultaAtualizada = await this.buscarPorId(consultaId, usuario);
+    void notificacoesDispatch.pagamentoConfirmadoConsulta({ consultaId });
 
     return { consulta: consultaAtualizada, retorno, creditosUsados };
   },
@@ -4819,6 +4821,7 @@ async decidirNoShowFisio(id, body, usuario) {
     await tentarAutoConfirmarConsultaAposPagamento(usuario, consultaId);
 
     const consultaAtualizada = await this.buscarPorId(consultaId, usuario);
+    void notificacoesDispatch.pagamentoConfirmadoConsulta({ consultaId });
 
     return { consulta: consultaAtualizada, retorno };
   },
@@ -5164,6 +5167,15 @@ async validarTokenConsulta(id, body, usuario) {
   `);
 
   const consultaAtualizada = await this.buscarPorId(consultaId, usuario);
+  const statusAtualizado = String(consultaAtualizada?.Status || '').trim();
+  if (
+    statusAtualizado === STATUS.CONCLUIDA ||
+    statusAtualizado === 'Concluida' ||
+    consultaAtualizada?.ConfirmacaoAtendimento === true ||
+    consultaAtualizada?.ConfirmacaoAtendimento === 1
+  ) {
+    void notificacoesDispatch.consultaConcluida({ consultaId });
+  }
 
   return {
     resultado: r?.recordset?.[0] ?? null,
