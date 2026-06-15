@@ -3,6 +3,7 @@ import { ENV } from '../config/env.js';
 import { log } from '../config/logger.js';
 import { queryWithContext } from './_queryWithContext.js';
 import { asaasClient } from './asaasClient.js';
+import notificacoesDispatch from './notificacoesDispatch.js';
 
 const STATUS_LOTE_ATIVO = ['Processando', 'EnviadoGateway', 'AguardandoConfirmacao'];
 const STATUS_TRANSFER_DONE = new Set(['DONE']);
@@ -1031,7 +1032,17 @@ const repassesGatewayService = {
       END CATCH
     `);
 
-    return result?.recordset?.[0] ?? null;
+    const row = result?.recordset?.[0] ?? null;
+    if (row?.Id) {
+      void notificacoesDispatch.repasseConcluido({ loteId: row.Id }).catch((err) => {
+        log('warn', 'Falha ao enfileirar notificação de repasse concluído', {
+          loteId: row.Id,
+          erro: err?.message,
+        });
+      });
+    }
+
+    return row;
   },
 
   async marcarFalha(lote, erro, { maxAttempts = 8 } = {}, usuario = null) {

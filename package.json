@@ -24,6 +24,7 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
+    "@aws-sdk/client-sesv2": "^3.1068.0",
     "apple-signin-auth": "^2.0.0",
     "axios": "^1.7.3",
     "bcrypt": "^6.0.0",
@@ -33,7 +34,7 @@
     "dotenv": "^16.6.1",
     "express": "^5.1.0",
     "express-rate-limit": "^7.5.0",
-    "file-type": "^20.5.0",
+    "file-type": "^22.0.1",
     "google-auth-library": "^10.6.1",
     "helmet": "^8.1.0",
     "mssql": "^12.0.0",

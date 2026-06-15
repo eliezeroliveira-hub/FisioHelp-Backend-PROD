@@ -82,7 +82,7 @@ async function safeDispatch(nome, fn) {
   }
 }
 
-async function enfileirar(destinatario, notificacao) {
+async function enfileirar(destinatario, notificacao, { canal = 'push', gravarInbox = true } = {}) {
   const usuarioId = asId(destinatario?.usuarioId);
   const usuarioTipo = texto(destinatario?.usuarioTipo);
   if (!usuarioId || !['Paciente', 'Fisioterapeuta'].includes(usuarioTipo)) return null;
@@ -91,15 +91,21 @@ async function enfileirar(destinatario, notificacao) {
     {
       usuarioTipo,
       usuarioId,
-      canal: 'push',
+      canal,
       tipo: notificacao.tipo,
       titulo: notificacao.titulo,
       mensagem: limitar(notificacao.mensagem, 500),
       dados: notificacao.dados ?? null,
       referenciaId: notificacao.referenciaId ?? null
     },
-    { usuarioRegistro: REGISTRO }
+    { usuarioRegistro: REGISTRO, gravarInbox }
   );
+}
+
+async function enfileirarPushEEmail(destinatario, notificacao) {
+  const push = await enfileirar(destinatario, notificacao);
+  const email = await enfileirar(destinatario, notificacao, { canal: 'email', gravarInbox: false });
+  return push ?? email;
 }
 
 async function buscarConsultaResumo(consultaId) {
@@ -289,6 +295,54 @@ async function jaExisteEventoPacote({ usuarioId, pacoteId, evento }) {
   return !!result.recordset?.[0]?.Id;
 }
 
+async function jaExisteRepasseConcluido({ fisioterapeutaId, loteId }) {
+  const destinoId = asId(fisioterapeutaId);
+  const refId = asId(loteId);
+  if (!destinoId || !refId) return false;
+
+  const result = await queryWithContext(usuarioSistema(), (req) => {
+    req.input('UsuarioId', sql.Int, destinoId);
+    req.input('ReferenciaId', sql.Int, refId);
+  }, `
+    SELECT TOP (1) Id
+    FROM dbo.Notificacoes
+    WHERE UsuarioTipo = N'Fisioterapeuta'
+      AND UsuarioId = @UsuarioId
+      AND Tipo = N'Pagamento'
+      AND ReferenciaId = @ReferenciaId
+    ORDER BY Id DESC;
+  `, { requireContext: true });
+
+  return !!result.recordset?.[0]?.Id;
+}
+
+async function buscarRepasseConcluidoDestinatarios(loteId) {
+  const id = asId(loteId);
+  if (!id) return [];
+
+  const result = await queryWithContext(usuarioSistema(), (req) => {
+    req.input('LoteId', sql.Int, id);
+  }, `
+    SELECT
+      r.FisioterapeutaId,
+      SUM(CAST(ISNULL(i.ValorTransferidoItem, 0) AS DECIMAL(10,2))) AS ValorTransferido
+    FROM dbo.LoteRepassesGatewayItens i
+    INNER JOIN dbo.Repasses r ON r.Id = i.RepasseId
+    WHERE i.LoteId = @LoteId
+      AND r.FisioterapeutaId IS NOT NULL
+    GROUP BY r.FisioterapeutaId
+    ORDER BY r.FisioterapeutaId;
+  `, { requireContext: true });
+
+  return result.recordset || [];
+}
+
+function formatarMoeda(valor) {
+  const numero = Number(valor);
+  if (!Number.isFinite(numero) || numero <= 0) return null;
+  return numero.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
 function dadosBase(tipo, extras = {}) {
   return { tipo, ...extras };
 }
@@ -307,7 +361,7 @@ async function consultaAgendada({ consultaId, notificarPaciente = true, notifica
 
     const envios = [];
     if (notificarPaciente) {
-      envios.push(enfileirar(
+      envios.push(enfileirarPushEEmail(
         { usuarioTipo: 'Paciente', usuarioId: consulta.PacienteId },
         {
           tipo: 'Agendamento',
@@ -320,7 +374,7 @@ async function consultaAgendada({ consultaId, notificarPaciente = true, notifica
     }
 
     if (notificarFisioterapeuta) {
-      envios.push(enfileirar(
+      envios.push(enfileirarPushEEmail(
         { usuarioTipo: 'Fisioterapeuta', usuarioId: consulta.FisioterapeutaId },
         {
           tipo: 'Agendamento',
@@ -343,7 +397,7 @@ async function consultaConfirmada({ consultaId }) {
     if (!consulta) return null;
 
     const data = formatarDataHora(consulta.DataHora);
-    return enfileirar(
+    return enfileirarPushEEmail(
       { usuarioTipo: 'Paciente', usuarioId: consulta.PacienteId },
       {
         tipo: 'Agendamento',
@@ -470,7 +524,7 @@ async function consultaCancelada({ consultaId, motivo = null }) {
     const complemento = motivo ? ` Motivo: ${limitar(motivo, 120)}` : '';
     const payload = dadosBase('consulta_cancelada', { consultaId: Number(consulta.Id) });
 
-    await enfileirar(
+    await enfileirarPushEEmail(
       { usuarioTipo: 'Paciente', usuarioId: consulta.PacienteId },
       {
         tipo: 'Agendamento',
@@ -481,7 +535,7 @@ async function consultaCancelada({ consultaId, motivo = null }) {
       }
     );
 
-    return enfileirar(
+    return enfileirarPushEEmail(
       { usuarioTipo: 'Fisioterapeuta', usuarioId: consulta.FisioterapeutaId },
       {
         tipo: 'Agendamento',
@@ -551,7 +605,7 @@ async function pagamentoConfirmadoConsulta({ transacaoId = null, consultaId = nu
     if (!consulta) return null;
 
     const data = formatarDataHora(consulta.DataHora);
-    return enfileirar(
+    return enfileirarPushEEmail(
       { usuarioTipo: 'Paciente', usuarioId: consulta.PacienteId },
       {
         tipo: 'Pagamento',
@@ -739,7 +793,7 @@ async function disputaAberta({ disputaId = null, consultaId = null }) {
     });
     const data = formatarDataHora(disputa.DataHora);
 
-    await enfileirar(
+    await enfileirarPushEEmail(
       { usuarioTipo: 'Paciente', usuarioId: disputa.PacienteId },
       {
         tipo: 'Disputa',
@@ -750,7 +804,7 @@ async function disputaAberta({ disputaId = null, consultaId = null }) {
       }
     );
 
-    return enfileirar(
+    return enfileirarPushEEmail(
       { usuarioTipo: 'Fisioterapeuta', usuarioId: disputa.FisioterapeutaId },
       {
         tipo: 'Disputa',
@@ -776,7 +830,7 @@ async function disputaAtualizada({ disputaId, status = null }) {
     });
     const data = formatarDataHora(disputa.DataHora);
 
-    await enfileirar(
+    await enfileirarPushEEmail(
       { usuarioTipo: 'Paciente', usuarioId: disputa.PacienteId },
       {
         tipo: 'Disputa',
@@ -787,7 +841,7 @@ async function disputaAtualizada({ disputaId, status = null }) {
       }
     );
 
-    return enfileirar(
+    return enfileirarPushEEmail(
       { usuarioTipo: 'Fisioterapeuta', usuarioId: disputa.FisioterapeutaId },
       {
         tipo: 'Disputa',
@@ -805,7 +859,7 @@ async function chamadoAberto({ chamadoId }) {
     const chamado = await buscarChamadoResumo(chamadoId);
     if (!chamado || !['Paciente', 'Fisioterapeuta'].includes(chamado.UsuarioTipo)) return null;
 
-    return enfileirar(
+    return enfileirarPushEEmail(
       { usuarioTipo: chamado.UsuarioTipo, usuarioId: chamado.UsuarioId },
       {
         tipo: 'Chamado',
@@ -823,7 +877,7 @@ async function chamadoAtualizado({ chamadoId, status = null }) {
     const chamado = await buscarChamadoResumo(chamadoId);
     if (!chamado || !['Paciente', 'Fisioterapeuta'].includes(chamado.UsuarioTipo)) return null;
 
-    return enfileirar(
+    return enfileirarPushEEmail(
       { usuarioTipo: chamado.UsuarioTipo, usuarioId: chamado.UsuarioId },
       {
         tipo: 'Chamado',
@@ -839,12 +893,54 @@ async function chamadoAtualizado({ chamadoId, status = null }) {
   });
 }
 
+async function repasseConcluido({ loteId }) {
+  return safeDispatch('repasseConcluido', async () => {
+    const id = asId(loteId);
+    if (!id) return null;
+
+    const destinatarios = await buscarRepasseConcluidoDestinatarios(id);
+    if (destinatarios.length === 0) return null;
+
+    const envios = [];
+    for (const destino of destinatarios) {
+      const fisioterapeutaId = asId(destino.FisioterapeutaId);
+      if (!fisioterapeutaId) continue;
+
+      if (await jaExisteRepasseConcluido({ fisioterapeutaId, loteId: id })) {
+        continue;
+      }
+
+      const valor = Number(destino.ValorTransferido ?? 0);
+      const valorTexto = formatarMoeda(valor);
+      envios.push(enfileirar(
+        { usuarioTipo: 'Fisioterapeuta', usuarioId: fisioterapeutaId },
+        {
+          tipo: 'Pagamento',
+          titulo: 'Repasse concluído',
+          mensagem: `Seu repasse FisioHelp${valorTexto ? ` de ${valorTexto}` : ''} foi concluído.`,
+          referenciaId: id,
+          dados: dadosBase('repasse_concluido', {
+            loteId: id,
+            fisioterapeutaId,
+            valor: Number.isFinite(valor) && valor > 0 ? valor : null
+          })
+        },
+        { canal: 'email', gravarInbox: true }
+      ));
+    }
+
+    if (envios.length === 0) return null;
+    const resultados = await Promise.all(envios);
+    return resultados.find(Boolean) ?? null;
+  });
+}
+
 async function crefitoAprovado({ fisioterapeutaId }) {
   return safeDispatch('crefitoAprovado', async () => {
     const fisio = await buscarFisioterapeutaResumo(fisioterapeutaId);
     if (!fisio) return null;
 
-    return enfileirar(
+    return enfileirarPushEEmail(
       { usuarioTipo: 'Fisioterapeuta', usuarioId: fisio.Id },
       {
         tipo: 'Credenciamento',
@@ -877,6 +973,7 @@ const notificacoesDispatch = {
   disputaAtualizada,
   chamadoAberto,
   chamadoAtualizado,
+  repasseConcluido,
   crefitoAprovado
 };
 
@@ -900,6 +997,7 @@ export {
   disputaAtualizada,
   chamadoAberto,
   chamadoAtualizado,
+  repasseConcluido,
   crefitoAprovado
 };
 

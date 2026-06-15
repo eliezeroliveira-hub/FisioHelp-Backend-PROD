@@ -1,9 +1,12 @@
 import { sql } from '../config/dbConfig.js';
 import { ENV } from '../config/env.js';
 import { log } from '../config/logger.js';
+import { enviarEmail } from '../providers/emailProvider.js';
 import { enviarPush } from '../providers/pushProvider.js';
 import { HttpError } from '../utils/httpError.js';
+import { isValidEmail, normalizeEmail } from '../utils/identityValidators.js';
 import { queryWithContext } from './_queryWithContext.js';
+import { montarEmailNotificacao } from './emailTemplates.js';
 
 const USUARIOS_VALIDOS = new Set(['Paciente', 'Fisioterapeuta']);
 const PLATAFORMAS_VALIDAS = new Set(['ios', 'android']);
@@ -84,6 +87,19 @@ function validarCanal(canal) {
     throw new HttpError(400, 'canal inválido.');
   }
   return valor;
+}
+
+function normalizarCanaisAtivos(canaisAtivos) {
+  if (canaisAtivos === undefined || canaisAtivos === null) return ['push'];
+  if (!Array.isArray(canaisAtivos)) {
+    throw new HttpError(400, 'canaisAtivos inválido.');
+  }
+
+  return [...new Set(canaisAtivos.map((canal) => validarCanal(canal)))];
+}
+
+function isBitAtivo(value) {
+  return value === true || Number(value) === 1;
 }
 
 function validarTipo(tipo) {
@@ -198,7 +214,7 @@ async function enfileirarNotificacao(
     dados = null,
     referenciaId = null
   },
-  { usuarioRegistro: registroInput = null } = {}
+  { usuarioRegistro: registroInput = null, gravarInbox = true } = {}
 ) {
   const destino = validarUsuarioDestino(usuarioTipo, usuarioId);
   const canalNorm = validarCanal(canal);
@@ -233,29 +249,31 @@ async function enfileirarNotificacao(
   }
 
   let inboxId = null;
-  try {
-    const inboxResult = await queryWithContext(contextoSistema(), (req) => {
-      req.input('UsuarioTipo', sql.NVarChar(20), destino.usuarioTipo);
-      req.input('UsuarioId', sql.Int, destino.usuarioId);
-      req.input('Tipo', sql.NVarChar(30), tipoNorm);
-      req.input('Mensagem', sql.NVarChar(255), truncarInbox(mensagemNorm));
-      req.input('ReferenciaId', sql.Int, referenciaIdNorm);
-    }, `
-      INSERT INTO [dbo].[Notificacoes]
-        ([UsuarioTipo], [UsuarioId], [Tipo], [Mensagem], [Lida], [DataEnvio], [ReferenciaId])
-      OUTPUT inserted.[Id] AS [Id]
-      VALUES
-        (@UsuarioTipo, @UsuarioId, @Tipo, @Mensagem, 0, GETDATE(), @ReferenciaId);
-    `, { requireContext: true });
+  if (gravarInbox !== false) {
+    try {
+      const inboxResult = await queryWithContext(contextoSistema(), (req) => {
+        req.input('UsuarioTipo', sql.NVarChar(20), destino.usuarioTipo);
+        req.input('UsuarioId', sql.Int, destino.usuarioId);
+        req.input('Tipo', sql.NVarChar(30), tipoNorm);
+        req.input('Mensagem', sql.NVarChar(255), truncarInbox(mensagemNorm));
+        req.input('ReferenciaId', sql.Int, referenciaIdNorm);
+      }, `
+        INSERT INTO [dbo].[Notificacoes]
+          ([UsuarioTipo], [UsuarioId], [Tipo], [Mensagem], [Lida], [DataEnvio], [ReferenciaId])
+        OUTPUT inserted.[Id] AS [Id]
+        VALUES
+          (@UsuarioTipo, @UsuarioId, @Tipo, @Mensagem, 0, GETDATE(), @ReferenciaId);
+      `, { requireContext: true });
 
-    inboxId = inboxResult.recordset?.[0]?.Id ?? null;
-  } catch (erro) {
-    log('warn', 'Falha ao gravar inbox in-app para notificação enfileirada', {
-      filaId,
-      usuarioTipo: destino.usuarioTipo,
-      usuarioId: destino.usuarioId,
-      erro: erro?.message
-    });
+      inboxId = inboxResult.recordset?.[0]?.Id ?? null;
+    } catch (erro) {
+      log('warn', 'Falha ao gravar inbox in-app para notificação enfileirada', {
+        filaId,
+        usuarioTipo: destino.usuarioTipo,
+        usuarioId: destino.usuarioId,
+        erro: erro?.message
+      });
+    }
   }
 
   return { filaId, inboxId };
@@ -334,17 +352,25 @@ async function recuperarProcessandoTravado({ staleMinutes = 10 } = {}, usuario =
   return Number(result.recordset?.[0]?.Recuperados ?? 0);
 }
 
-async function reivindicarLote({ batchSize = 10 } = {}, usuario = null) {
+async function reivindicarLote({ batchSize = 10, canaisAtivos = ['push'] } = {}, usuario = null) {
   const ctx = usuario?.tipo && usuario?.id ? usuario : contextoSistema();
   const size = Math.max(1, Math.min(Number(batchSize) || 10, 50));
+  const canais = normalizarCanaisAtivos(canaisAtivos);
+
+  if (canais.length === 0) return [];
+
+  const placeholders = canais.map((_, i) => `@Canal${i}`).join(', ');
 
   const result = await queryWithContext(ctx, (req) => {
     req.input('BatchSize', sql.Int, size);
+    canais.forEach((canal, i) => {
+      req.input(`Canal${i}`, sql.NVarChar(10), canal);
+    });
   }, `
     ;WITH lote AS (
       SELECT TOP (@BatchSize) [Id]
       FROM [dbo].[FilaNotificacoes] WITH (UPDLOCK, READPAST, ROWLOCK, READCOMMITTEDLOCK)
-      WHERE [Canal] = N'push'
+      WHERE [Canal] IN (${placeholders})
         AND [Status] IN (N'Pendente', N'FalhaTemporaria')
         AND [Tentativas] < [MaxTentativas]
         AND ([ProximaTentativaEm] IS NULL OR [ProximaTentativaEm] <= SYSDATETIME())
@@ -359,6 +385,7 @@ async function reivindicarLote({ batchSize = 10 } = {}, usuario = null) {
       inserted.[Id],
       inserted.[UsuarioTipo],
       inserted.[UsuarioId],
+      inserted.[Canal],
       inserted.[Titulo],
       inserted.[Mensagem],
       inserted.[DadosJson],
@@ -389,6 +416,47 @@ async function listarDispositivosAtivos(usuarioTipo, usuarioId, usuario = null) 
   `, { requireContext: true });
 
   return result.recordset || [];
+}
+
+async function resolverEmailUsuario(usuarioTipo, usuarioId) {
+  const destino = validarUsuarioDestino(usuarioTipo, usuarioId);
+  const ctx = contextoSistema();
+  let result;
+
+  if (destino.usuarioTipo === 'Paciente') {
+    result = await queryWithContext(ctx, (req) => {
+      req.input('Id', sql.Int, destino.usuarioId);
+    }, `
+      SELECT TOP (1) [Email], [EmailVerificado]
+      FROM [dbo].[Pacientes]
+      WHERE [Id] = @Id;
+    `, { requireContext: true });
+  } else {
+    result = await queryWithContext(ctx, (req) => {
+      req.input('Id', sql.Int, destino.usuarioId);
+    }, `
+      SELECT TOP (1) [Email], [EmailVerificado]
+      FROM [dbo].[Fisioterapeutas]
+      WHERE [Id] = @Id;
+    `, { requireContext: true });
+  }
+
+  const row = result.recordset?.[0] || null;
+  const email = normalizeEmail(row?.Email);
+
+  if (!email) {
+    return { email: null, erro: 'sem e-mail cadastrado' };
+  }
+
+  if (!isValidEmail(email)) {
+    return { email: null, erro: 'e-mail inválido' };
+  }
+
+  if (!isBitAtivo(row?.EmailVerificado)) {
+    return { email: null, erro: 'e-mail não verificado' };
+  }
+
+  return { email, erro: null };
 }
 
 async function desativarDispositivoPorId(id, usuario = null) {
@@ -472,7 +540,7 @@ async function marcarFalhaTemporaria(id, erro, backoffSeg = 60, usuario = null) 
   `, { requireContext: true });
 }
 
-async function processarItem(item, usuario = null) {
+async function processarPushItem(item, usuario = null) {
   const filaId = normalizarIdPositivo(item?.Id, 'filaId');
   const dispositivos = await listarDispositivosAtivos(item.UsuarioTipo, item.UsuarioId, usuario);
 
@@ -533,6 +601,72 @@ async function processarItem(item, usuario = null) {
   return { status: 'FalhaDefinitiva', ...resultados };
 }
 
+async function processarEmailItem(item, usuario = null) {
+  const filaId = normalizarIdPositivo(item?.Id, 'filaId');
+  const resolucao = await resolverEmailUsuario(item.UsuarioTipo, item.UsuarioId);
+
+  if (!resolucao.email) {
+    await marcarFalhaDefinitiva(filaId, resolucao.erro || 'sem e-mail cadastrado', usuario);
+    return { status: 'FalhaDefinitiva', canal: 'email', motivo: 'email_indisponivel' };
+  }
+
+  const template = montarEmailNotificacao({
+    titulo: item.Titulo,
+    mensagem: item.Mensagem,
+  });
+
+  let resultado;
+  try {
+    resultado = await enviarEmail({
+      destinatario: resolucao.email,
+      assunto: template.assunto,
+      corpoHtml: template.corpoHtml,
+      corpoTexto: template.corpoTexto,
+    });
+  } catch (erro) {
+    resultado = {
+      resultado: 'tempFalha',
+      erro: erro?.message || 'Falha temporária no provider de e-mail.',
+    };
+  }
+
+  const classificacao = classificarResultadoProvider(resultado);
+  const erro = resultado?.erro || (
+    classificacao === 'invalido'
+      ? 'Destinatário de e-mail inválido.'
+      : 'Falha permanente ao enviar e-mail.'
+  );
+
+  if (classificacao === 'sucesso') {
+    await marcarEnviado(filaId, usuario);
+    return { status: 'Enviado', canal: 'email' };
+  }
+
+  if (classificacao === 'tempFalha') {
+    await marcarFalhaTemporaria(filaId, erro, calcularBackoffSeg(item.Tentativas), usuario);
+    return { status: 'FalhaTemporaria', canal: 'email', erro };
+  }
+
+  await marcarFalhaDefinitiva(filaId, erro, usuario);
+  return { status: 'FalhaDefinitiva', canal: 'email', erro };
+}
+
+async function processarItem(item, usuario = null) {
+  const filaId = normalizarIdPositivo(item?.Id, 'filaId');
+  const canal = validarCanal(item?.Canal || 'push');
+
+  if (canal === 'email') {
+    return processarEmailItem(item, usuario);
+  }
+
+  if (canal === 'push') {
+    return processarPushItem(item, usuario);
+  }
+
+  await marcarFalhaDefinitiva(filaId, 'canal inválido', usuario);
+  return { status: 'FalhaDefinitiva', motivo: 'canal_invalido' };
+}
+
 const notificacoesService = {
   registrarDispositivo,
   desativarDispositivo,
@@ -541,6 +675,7 @@ const notificacoesService = {
   recuperarProcessandoTravado,
   reivindicarLote,
   listarDispositivosAtivos,
+  resolverEmailUsuario,
   desativarDispositivoPorId,
   marcarEnviado,
   marcarFalhaTemporaria,
@@ -557,6 +692,7 @@ export {
   recuperarProcessandoTravado,
   reivindicarLote,
   listarDispositivosAtivos,
+  resolverEmailUsuario,
   desativarDispositivoPorId,
   marcarEnviado,
   marcarFalhaTemporaria,

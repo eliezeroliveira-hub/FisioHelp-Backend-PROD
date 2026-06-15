@@ -66,6 +66,14 @@ if (!['stub', 'expo', 'fcm', 'apns'].includes(pushProviderMode)) {
 }
 const expoPushAccessToken = optionalEnv('EXPO_PUSH_ACCESS_TOKEN');
 
+const emailProviderMode = String(process.env.EMAIL_PROVIDER_MODE || 'stub').trim().toLowerCase();
+if (!['stub', 'ses'].includes(emailProviderMode)) {
+  throw new Error('EMAIL_PROVIDER_MODE inválido. Use stub ou ses.');
+}
+const awsRegion = optionalEnv('AWS_REGION') || 'sa-east-1';
+const emailFrom = optionalEnv('EMAIL_FROM') || 'nao-responda@notificacoes.fisiohelp.com.br';
+const emailReplyTo = optionalEnv('EMAIL_REPLY_TO');
+
 const refreshTokenDays = parsePositiveIntEnv('REFRESH_TOKEN_DAYS', 30);
 
 /**
@@ -113,9 +121,13 @@ export const ENV = {
   ASAAS_WEBHOOK_TOKEN: asaasWebhookToken,
   ASAAS_WITHDRAWAL_WEBHOOK_TOKEN: asaasWithdrawalWebhookToken,
 
-  // Push notifications
+  // Notificações
   PUSH_PROVIDER_MODE: pushProviderMode,
   EXPO_PUSH_ACCESS_TOKEN: expoPushAccessToken,
+  EMAIL_PROVIDER_MODE: emailProviderMode,
+  AWS_REGION: awsRegion,
+  EMAIL_FROM: emailFrom,
+  EMAIL_REPLY_TO: emailReplyTo,
   NOTIF_WORKER_ENABLED: process.env.NOTIF_WORKER_ENABLED,
   NOTIF_WORKER_INTERVAL_MS: process.env.NOTIF_WORKER_INTERVAL_MS,
   NOTIF_WORKER_STALE_MINUTES: process.env.NOTIF_WORKER_STALE_MINUTES,

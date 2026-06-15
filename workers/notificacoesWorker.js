@@ -1,6 +1,7 @@
 import { ENV } from '../config/env.js';
 import { log } from '../config/logger.js';
-import { isProviderReal } from '../providers/pushProvider.js';
+import { isEmailProviderReal } from '../providers/emailProvider.js';
+import { isProviderReal as isPushProviderReal } from '../providers/pushProvider.js';
 import notificacoesService from '../services/notificacoesService.js';
 
 function boolEnv(value, fallback = true) {
@@ -29,9 +30,24 @@ const config = {
 let timer = null;
 let running = false;
 let missingStructureWarned = false;
+let noActiveChannelsWarned = false;
 
 function usuarioSistema() {
   return { tipo: 'Admin', id: Number(ENV.SYSTEM_ADMIN_ID ?? 1) };
+}
+
+function isProduction() {
+  return String(ENV.NODE_ENV || '').toLowerCase() === 'production';
+}
+
+function canaisAtivos() {
+  const dev = !isProduction();
+  const canais = [];
+
+  if (dev || isPushProviderReal) canais.push('push');
+  if (dev || isEmailProviderReal) canais.push('email');
+
+  return canais;
 }
 
 export async function tick() {
@@ -55,8 +71,18 @@ export async function tick() {
       usuario
     );
 
+    const canais = canaisAtivos();
+    if (canais.length === 0) {
+      if (!noActiveChannelsWarned) {
+        noActiveChannelsWarned = true;
+        log('warn', 'Worker de notificações sem canais ativos para reivindicar. Configure um provider real em produção.');
+      }
+      return;
+    }
+    noActiveChannelsWarned = false;
+
     const lote = await notificacoesService.reivindicarLote(
-      { batchSize: config.batchSize },
+      { batchSize: config.batchSize, canaisAtivos: canais },
       usuario
     );
 
@@ -91,12 +117,18 @@ export function startNotificacoesWorker() {
     return null;
   }
 
-  if (ENV.NODE_ENV === 'production' && !isProviderReal) {
-    log('error', 'Worker de notificações abortado: PUSH_PROVIDER_MODE=stub em produção. Defina expo, fcm ou apns.');
-    return null;
-  }
-
   if (timer) return timer;
+
+  const canais = canaisAtivos();
+  if (canais.length === 0) {
+    log('warn', 'Worker de notificações iniciado sem canais ativos. Itens permanecerão Pendentes até configurar provider real.');
+  }
+  if (isProduction() && !isPushProviderReal) {
+    log('warn', 'Canal push não será reivindicado em produção porque PUSH_PROVIDER_MODE está em stub.');
+  }
+  if (isProduction() && !isEmailProviderReal) {
+    log('warn', 'Canal email não será reivindicado em produção porque EMAIL_PROVIDER_MODE está em stub.');
+  }
 
   timer = setInterval(() => {
     tick().catch((err) => {
@@ -116,7 +148,9 @@ export function startNotificacoesWorker() {
     intervalMs: config.intervalMs,
     staleMinutes: config.staleMinutes,
     batchSize: config.batchSize,
-    providerReal: isProviderReal,
+    pushProviderReal: isPushProviderReal,
+    emailProviderReal: isEmailProviderReal,
+    canaisAtivos: canais,
   });
 
   return timer;
