@@ -613,6 +613,7 @@ async function processarEmailItem(item, usuario = null) {
   const template = montarEmailNotificacao({
     titulo: item.Titulo,
     mensagem: item.Mensagem,
+    dados: parseDadosJsonSeguro(item.DadosJson),
   });
 
   let resultado;

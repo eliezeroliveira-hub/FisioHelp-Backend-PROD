@@ -120,10 +120,16 @@ async function buscarConsultaResumo(consultaId) {
       c.PacienteId,
       c.FisioterapeutaId,
       c.DataHora,
+      c.ValorConsulta,
       LTRIM(RTRIM(ISNULL(c.Status, N''))) AS Status,
       LTRIM(RTRIM(ISNULL(c.StatusPagamento, N''))) AS StatusPagamento,
       p.Nome AS PacienteNome,
+      p.EnderecoResidencial AS PacienteEnderecoResidencial,
+      p.EnderecoComercial AS PacienteEnderecoComercial,
+      p.Cep AS PacienteCep,
+      p.CepComercial AS PacienteCepComercial,
       f.Nome AS FisioterapeutaNome,
+      f.CREFITO AS FisioterapeutaCrefito,
       ISNULL(e.Nome, f.Especialidade) AS EspecialidadeNome
     FROM dbo.Consultas c
     LEFT JOIN dbo.Pacientes p ON p.Id = c.PacienteId
@@ -341,6 +347,19 @@ function formatarMoeda(valor) {
   const numero = Number(valor);
   if (!Number.isFinite(numero) || numero <= 0) return null;
   return numero.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function juntarPartes(...partes) {
+  return partes
+    .map((parte) => texto(parte))
+    .filter(Boolean)
+    .join(', ');
+}
+
+function enderecoAtendimentoConsulta(consulta) {
+  const residencial = juntarPartes(consulta?.PacienteEnderecoResidencial, consulta?.PacienteCep);
+  if (residencial) return residencial;
+  return juntarPartes(consulta?.PacienteEnderecoComercial, consulta?.PacienteCepComercial);
 }
 
 function dadosBase(tipo, extras = {}) {
@@ -614,7 +633,17 @@ async function pagamentoConfirmadoConsulta({ transacaoId = null, consultaId = nu
         referenciaId: Number(consulta.Id),
         dados: dadosBase('pagamento_consulta_confirmado', {
           consultaId: Number(consulta.Id),
-          transacaoId: asId(transacaoId)
+          transacaoId: asId(transacaoId),
+          codigoContratacao: `AGD-${new Date().getFullYear()}-${String(Number(consulta.Id)).padStart(6, '0')}`,
+          contratacaoEm: new Date().toISOString(),
+          pacienteNome: consulta.PacienteNome ?? null,
+          fisioterapeutaId: Number(consulta.FisioterapeutaId),
+          fisioterapeutaNome: consulta.FisioterapeutaNome ?? null,
+          fisioterapeutaCrefito: consulta.FisioterapeutaCrefito ?? null,
+          dataHoraConsulta: consulta.DataHora ?? null,
+          dataConsultaTexto: data,
+          enderecoAtendimento: enderecoAtendimentoConsulta(consulta) || null,
+          valorTotal: consulta.ValorConsulta ?? null
         })
       }
     );
