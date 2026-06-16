@@ -38,6 +38,13 @@ function formatarMoeda(valor) {
   return numero.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+function formatarCnpj(value) {
+  const raw = texto(value);
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length !== 14) return raw || null;
+  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
+}
+
 function formatarDataHora(value) {
   if (!value) return null;
 
@@ -182,6 +189,7 @@ function montarEmailPagamentoConsulta(dados = {}) {
   const valorTotal = formatarMoeda(dados.valorTotal);
   const endereco = texto(dados.enderecoAtendimento, 'Endereço cadastrado na plataforma');
   const crefito = texto(dados.fisioterapeutaCrefito, 'não informado');
+  const cnpj = texto(formatarCnpj(dados.fisioterapeutaCnpj), 'não informado');
   const codigo = texto(dados.codigoContratacao, codigoContratacao(consultaId, contratacaoEm));
   const numeroAgendamento = Number.isInteger(consultaId) && consultaId > 0 ? `#${consultaId}` : '-';
   const dataContratacao = formatarDataHora(contratacaoEm) || texto(contratacaoEm, '-');
@@ -194,6 +202,7 @@ function montarEmailPagamentoConsulta(dados = {}) {
     linhaResumo('Status de pagamento', 'Confirmado'),
     linhaResumo('Profissional', fisioterapeutaNome),
     linhaResumo('Registro profissional', `CREFITO ${crefito}`),
+    linhaResumo('CNPJ do Profissional/Clínica', cnpj),
     linhaResumo('Data', dataConsulta),
     linhaResumo('Hora', horaConsulta),
     linhaResumo('Local de atendimento', endereco),
@@ -248,6 +257,7 @@ Resumo da Consulta
 
 Profissional: ${fisioterapeutaNome}
 Registro profissional: CREFITO ${crefito}
+CNPJ do Profissional/Clínica: ${cnpj}
 Data e hora: ${dataConsulta || '-'}${horaConsulta ? ` às ${horaConsulta}` : ''}
 Local de atendimento: ${endereco}
 Valor total: ${valorTotal || '-'}

@@ -130,6 +130,7 @@ async function buscarConsultaResumo(consultaId) {
       p.CepComercial AS PacienteCepComercial,
       f.Nome AS FisioterapeutaNome,
       f.CREFITO AS FisioterapeutaCrefito,
+      f.CNPJ AS FisioterapeutaCnpj,
       ISNULL(e.Nome, f.Especialidade) AS EspecialidadeNome
     FROM dbo.Consultas c
     LEFT JOIN dbo.Pacientes p ON p.Id = c.PacienteId
@@ -640,6 +641,7 @@ async function pagamentoConfirmadoConsulta({ transacaoId = null, consultaId = nu
           fisioterapeutaId: Number(consulta.FisioterapeutaId),
           fisioterapeutaNome: consulta.FisioterapeutaNome ?? null,
           fisioterapeutaCrefito: consulta.FisioterapeutaCrefito ?? null,
+          fisioterapeutaCnpj: consulta.FisioterapeutaCnpj ?? null,
           dataHoraConsulta: consulta.DataHora ?? null,
           dataConsultaTexto: data,
           enderecoAtendimento: enderecoAtendimentoConsulta(consulta) || null,
