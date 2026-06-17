@@ -105,6 +105,32 @@ const pacientesController = {
       });
     }
   },
+
+  async ativarPreCadastro(req, res) {
+    try {
+      const data = await pacientesService.ativarPreCadastro(req.body || {}, req);
+      log('info', 'Pré-cadastro de paciente ativado', {
+        usuarioId: data?.usuario?.id,
+        email: data?.usuario?.email,
+      });
+
+      return res.status(200).json({
+        sucesso: true,
+        mensagem: data.mensagem || 'Pré-cadastro ativado com sucesso.',
+        token: data.token,
+        refreshToken: data.refreshToken,
+        usuario: data.usuario,
+      });
+    } catch (erro) {
+      log('error', 'Erro ao ativar pré-cadastro de paciente', { erro: erro.message });
+      const status = erro?.httpStatus || erro?.statusCode || 500;
+      const mensagem = erro?.message || 'Erro ao ativar pré-cadastro.';
+      return res.status(status).json({
+        erro: status >= 500 ? 'Erro interno do servidor.' : mensagem,
+        detalhes: status >= 500 ? undefined : mensagem,
+      });
+    }
+  },
   
   async solicitarVerificacaoContato(req, res) {
     try {

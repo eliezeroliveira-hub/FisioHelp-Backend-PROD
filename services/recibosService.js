@@ -50,10 +50,17 @@ function formatMoneyBRL(v) {
   return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+function formatCnpj(v) {
+  const raw = String(v ?? '').trim();
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length !== 14) return raw;
+  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
+}
+
 const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
 const RECIBOS_DIR = path.join(UPLOADS_DIR, 'recibos');
-const RECIBO_LAYOUT_VERSION_ATENDIMENTO = 'v4';
-const RECIBO_LAYOUT_VERSION_REEMBOLSO = 'v5';
+const RECIBO_LAYOUT_VERSION_ATENDIMENTO = 'v5';
+const RECIBO_LAYOUT_VERSION_REEMBOLSO = 'v6';
 const pdfEmAndamento = new Map();
 
 function resolveSafeUploadsPath(relativeOrAbsolutePath) {
@@ -147,6 +154,7 @@ async function gerarPdfReciboAtendimento({
   pacienteNome,
   fisioterapeutaNome,
   fisioterapeutaCrefito,
+  fisioterapeutaCnpj,
   dataHoraAtendimento,
   valorConsulta,
   origemPagamento,
@@ -253,6 +261,7 @@ async function gerarPdfReciboAtendimento({
   fieldRow('Data/Hora', formatDateTimeBR(dataHoraAtendimento) || '-');
   fieldRow('Fisioterapeuta', fisioterapeutaNome || '-');
   fieldRow('CREFITO', fisioterapeutaCrefito || '-');
+  fieldRow('CNPJ do Profissional', formatCnpj(fisioterapeutaCnpj) || '-');
 
   // ── SEÇÃO: Informações de Pagamento ──────────────────────────
   sectionTitle('Informações de Pagamento');
@@ -398,6 +407,7 @@ async function gerarPdfReciboReembolso(detalhe) {
   sectionTitle(tipo === 'ReembolsoPacote' ? 'Dados do Pacote' : 'Dados da Consulta');
   fieldRow('Fisioterapeuta', detalhe?.FisioterapeutaNome || '-');
   fieldRow('CREFITO', detalhe?.FisioterapeutaCrefito || '-');
+  fieldRow('CNPJ do Profissional', formatCnpj(detalhe?.FisioterapeutaCnpj) || '-');
 
   if (tipo === 'ReembolsoPacote') {
     const totalConsultas = Number(detalhe?.QuantidadeConsultas);
@@ -486,6 +496,7 @@ async function getReciboDetalheParaPdf(usuario, pacienteId, reciboId) {
       f.Id AS FisioterapeutaId,
       f.Nome AS FisioterapeutaNome,
       f.CREFITO AS FisioterapeutaCrefito,
+      f.CNPJ AS FisioterapeutaCnpj,
       pk.NomePacote AS PacoteNome,
       pk.QuantidadeConsultas,
       pk.ConsultasUtilizadas,
@@ -633,6 +644,7 @@ async function gerarPdfSeNecessarioSemMutex(usuario, pacienteId, reciboId) {
         pacienteNome: detalhe.PacienteNome,
         fisioterapeutaNome: detalhe.FisioterapeutaNome,
         fisioterapeutaCrefito: detalhe.FisioterapeutaCrefito,
+        fisioterapeutaCnpj: detalhe.FisioterapeutaCnpj,
         dataHoraAtendimento: detalhe.DataHora,
         valorConsulta: detalhe.ValorConsulta,
         origemPagamento: detalhe.OrigemPagamento,
@@ -737,6 +749,7 @@ export default {
         f.Id AS FisioterapeutaId,
         f.Nome AS FisioterapeutaNome,
         f.CREFITO AS FisioterapeutaCrefito,
+        f.CNPJ AS FisioterapeutaCnpj,
         pk.NomePacote AS PacoteNome,
         pk.QuantidadeConsultas,
         pk.ConsultasUtilizadas,
@@ -807,6 +820,7 @@ export default {
         f.Id AS FisioterapeutaId,
         f.Nome AS FisioterapeutaNome,
         f.CREFITO AS FisioterapeutaCrefito,
+        f.CNPJ AS FisioterapeutaCnpj,
         pk.NomePacote AS PacoteNome,
         pk.QuantidadeConsultas,
         pk.ConsultasUtilizadas,

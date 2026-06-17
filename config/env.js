@@ -70,6 +70,10 @@ const emailProviderMode = String(process.env.EMAIL_PROVIDER_MODE || 'stub').trim
 if (!['stub', 'ses'].includes(emailProviderMode)) {
   throw new Error('EMAIL_PROVIDER_MODE inválido. Use stub ou ses.');
 }
+const contatoProviderMode = String(process.env.CONTATO_PROVIDER_MODE || 'stub').trim().toLowerCase();
+if (!['stub', 'ses'].includes(contatoProviderMode)) {
+  throw new Error('CONTATO_PROVIDER_MODE inválido. Use stub ou ses.');
+}
 const awsRegion = optionalEnv('AWS_REGION') || 'sa-east-1';
 const emailFrom = optionalEnv('EMAIL_FROM') || 'nao-responda@notificacoes.fisiohelp.com.br';
 const emailReplyTo = optionalEnv('EMAIL_REPLY_TO');
@@ -125,6 +129,7 @@ export const ENV = {
   PUSH_PROVIDER_MODE: pushProviderMode,
   EXPO_PUSH_ACCESS_TOKEN: expoPushAccessToken,
   EMAIL_PROVIDER_MODE: emailProviderMode,
+  CONTATO_PROVIDER_MODE: contatoProviderMode,
   AWS_REGION: awsRegion,
   EMAIL_FROM: emailFrom,
   EMAIL_REPLY_TO: emailReplyTo,

@@ -104,6 +104,26 @@ function blocoTextoHtml(titulo, conteudo) {
     </div>`;
 }
 
+function textoMensagemHtml(value) {
+  const partes = String(value ?? '').split('**');
+  return partes
+    .map((parte, index) => {
+      const conteudo = escapeHtml(parte);
+      return index % 2 === 1
+        ? `<strong style="font-weight:700;">${conteudo}</strong>`
+        : conteudo;
+    })
+    .join('');
+}
+
+function paragrafoHtml(conteudo) {
+  return `<p style="margin:0 0 16px 0;color:#3D2B22;font-size:16px;line-height:1.6;">${textoMensagemHtml(conteudo)}</p>`;
+}
+
+function tituloSecaoHtml(conteudo) {
+  return `<h2 style="margin:0 0 10px 0;color:#3D2B22;font-size:18px;line-height:1.4;">${escapeHtml(conteudo)}</h2>`;
+}
+
 function rodapeHtml() {
   return `
     <p style="margin:0 0 14px 0;">${escapeHtml(FOOTER)}</p>
@@ -111,10 +131,14 @@ function rodapeHtml() {
       <tr>
         <td style="padding:0 8px 0 0;color:#6f5a4c;font-size:13px;line-height:28px;">Siga a FisioHelp nas redes sociais:</td>
         <td style="padding:0 6px 0 0;">
-          <a href="${escapeHtml(LINKEDIN_URL)}" aria-label="LinkedIn da FisioHelp" style="display:inline-block;width:28px;height:28px;border-radius:50%;background:#0A66C2;color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:28px;text-align:center;text-decoration:none;font-weight:700;">in</a>
+          <a href="${escapeHtml(INSTAGRAM_URL)}" aria-label="Instagram da FisioHelp" style="display:inline-block;width:36px;height:36px;border-radius:10px;background:#FDF4E0;border:1px solid rgba(61,43,34,0.16);text-align:center;text-decoration:none;line-height:36px;">
+            <span style="display:inline-block;width:16px;height:16px;border:2px solid #3D2B22;border-radius:5px;vertical-align:middle;line-height:16px;text-align:center;">
+              <span style="display:inline-block;width:5px;height:5px;border:2px solid #3D2B22;border-radius:50%;vertical-align:middle;"></span>
+            </span>
+          </a>
         </td>
         <td style="padding:0;">
-          <a href="${escapeHtml(INSTAGRAM_URL)}" aria-label="Instagram da FisioHelp" style="display:inline-block;width:28px;height:28px;border-radius:50%;background:#F46337;color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:28px;text-align:center;text-decoration:none;font-weight:700;">IG</a>
+          <a href="${escapeHtml(LINKEDIN_URL)}" aria-label="LinkedIn da FisioHelp" style="display:inline-block;width:36px;height:36px;border-radius:10px;background:#FDF4E0;border:1px solid rgba(61,43,34,0.16);color:#3D2B22;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:36px;text-align:center;text-decoration:none;font-weight:700;">in</a>
         </td>
       </tr>
     </table>`;
@@ -128,7 +152,7 @@ LinkedIn: ${LINKEDIN_URL}
 Instagram: ${INSTAGRAM_URL}`;
 }
 
-function montarShell({ assunto, conteudoHtml, conteudoTexto }) {
+export function montarShell({ assunto, conteudoHtml, conteudoTexto }) {
   const assuntoHtml = escapeHtml(assunto);
 
   const corpoHtml = `<!doctype html>
@@ -202,7 +226,7 @@ function montarEmailPagamentoConsulta(dados = {}) {
     linhaResumo('Status de pagamento', 'Confirmado'),
     linhaResumo('Profissional', fisioterapeutaNome),
     linhaResumo('Registro profissional', `CREFITO ${crefito}`),
-    linhaResumo('CNPJ do Profissional/Clínica', cnpj),
+    linhaResumo('CNPJ do Profissional', cnpj),
     linhaResumo('Data', dataConsulta),
     linhaResumo('Hora', horaConsulta),
     linhaResumo('Local de atendimento', endereco),
@@ -257,7 +281,7 @@ Resumo da Consulta
 
 Profissional: ${fisioterapeutaNome}
 Registro profissional: CREFITO ${crefito}
-CNPJ do Profissional/Clínica: ${cnpj}
+CNPJ do Profissional: ${cnpj}
 Data e hora: ${dataConsulta || '-'}${horaConsulta ? ` às ${horaConsulta}` : ''}
 Local de atendimento: ${endereco}
 Valor total: ${valorTotal || '-'}
@@ -302,7 +326,139 @@ CNPJ 67.039.614/0001-58`;
   return montarShell({ assunto, conteudoHtml, conteudoTexto });
 }
 
+function montarEmailConsultaCanceladaPaciente(dados = {}) {
+  const consultaId = Number(dados.consultaId);
+  const numeroConsulta = Number.isInteger(consultaId) && consultaId > 0 ? String(consultaId) : '-';
+  const fisioterapeutaNome = texto(dados.fisioterapeutaNome, 'o fisioterapeuta');
+  const data = texto(dados.dataConsultaTexto, 'data/hora informada no aplicativo');
+  const cnpj = texto(formatarCnpj(dados.fisioterapeutaCnpj), 'não informado');
+  const assunto = 'Cancelamento da consulta recebido';
+
+  const conteudoHtml = `
+    <h1 style="margin:0 0 18px 0;color:#3D2B22;font-size:22px;line-height:1.3;font-weight:700;">${escapeHtml(assunto)}</h1>
+    ${paragrafoHtml(`Confirmamos o recebimento da sua solicitação de cancelamento referente à consulta ${numeroConsulta} com ${fisioterapeutaNome}, agendada para ${data}.`)}
+    ${tituloSecaoHtml('Resumo da consulta cancelada')}
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 22px 0;border-top:1px solid rgba(61,43,34,0.10);border-bottom:1px solid rgba(61,43,34,0.10);">
+      ${linhaResumo('Profissional', fisioterapeutaNome)}
+      ${linhaResumo('CNPJ do Prestador', cnpj)}
+    </table>
+    ${paragrafoHtml('Sua solicitação foi registrada na plataforma FisioHelp e será processada conforme as regras aplicáveis dos Termos de Uso e da legislação vigente.')}
+    ${paragrafoHtml('Quando houver valor pago elegível à devolução, a FisioHelp comunicará a instituição financeira ou administradora do meio de pagamento para que o estorno seja processado. O prazo de efetivação poderá variar conforme o método de pagamento e as regras da instituição responsável.')}
+    ${paragrafoHtml('Você poderá acompanhar o status da solicitação pelo aplicativo.')}`;
+
+  const conteudoTexto = `${assunto}
+
+Confirmamos o recebimento da sua solicitação de cancelamento referente à consulta ${numeroConsulta} com ${fisioterapeutaNome}, agendada para ${data}.
+
+Resumo da consulta cancelada:
+
+Profissional: ${fisioterapeutaNome}
+CNPJ do Prestador: ${cnpj}
+
+Sua solicitação foi registrada na plataforma FisioHelp e será processada conforme as regras aplicáveis dos Termos de Uso e da legislação vigente.
+
+Quando houver valor pago elegível à devolução, a FisioHelp comunicará a instituição financeira ou administradora do meio de pagamento para que o estorno seja processado. O prazo de efetivação poderá variar conforme o método de pagamento e as regras da instituição responsável.
+
+Você poderá acompanhar o status da solicitação pelo aplicativo.`;
+
+  return montarShell({ assunto, conteudoHtml, conteudoTexto });
+}
+
+function montarEmailDisputaAbertaPaciente(dados = {}) {
+  const consultaId = Number(dados.consultaId);
+  const disputaId = Number(dados.disputaId);
+  const numeroConsulta = Number.isInteger(consultaId) && consultaId > 0 ? String(consultaId) : '-';
+  const protocolo = Number.isInteger(disputaId) && disputaId > 0 ? String(disputaId) : '-';
+  const assunto = 'Disputa aberta';
+
+  const conteudoHtml = `
+    <h1 style="margin:0 0 18px 0;color:#3D2B22;font-size:22px;line-height:1.3;font-weight:700;">${escapeHtml(assunto)}</h1>
+    ${paragrafoHtml(`Confirmamos o recebimento da sua disputa referente à consulta ${numeroConsulta}.`)}
+    ${paragrafoHtml(`Protocolo da disputa: ${protocolo}`)}
+    ${paragrafoHtml('A FisioHelp analisará sua solicitação e enviará uma resposta oficial em até 5 dias úteis.')}
+    ${paragrafoHtml('Você poderá acompanhar as atualizações pelo aplicativo.')}`;
+
+  const conteudoTexto = `${assunto}
+
+Confirmamos o recebimento da sua disputa referente à consulta ${numeroConsulta}.
+
+Protocolo da disputa: ${protocolo}
+
+A FisioHelp analisará sua solicitação e enviará uma resposta oficial em até 5 dias úteis.
+
+Você poderá acompanhar as atualizações pelo aplicativo.`;
+
+  return montarShell({ assunto, conteudoHtml, conteudoTexto });
+}
+
+function montarEmailDisputaAbertaFisioterapeuta(dados = {}) {
+  const disputaId = Number(dados.disputaId);
+  const protocolo = Number.isInteger(disputaId) && disputaId > 0 ? String(disputaId) : '-';
+  const pacienteNome = texto(dados.pacienteNome, 'o paciente');
+  const assunto = 'Disputa aberta';
+
+  const conteudoHtml = `
+    <h1 style="margin:0 0 18px 0;color:#3D2B22;font-size:22px;line-height:1.3;font-weight:700;">${escapeHtml(assunto)}</h1>
+    ${paragrafoHtml(`Foi registrada uma contestação relacionada à consulta com ${pacienteNome}.`)}
+    ${paragrafoHtml(`Protocolo da disputa: ${protocolo}`)}
+    ${paragrafoHtml('A FisioHelp analisará a solicitação e enviará uma resposta oficial em até 5 dias úteis.')}
+    ${paragrafoHtml('Você poderá apresentar informações, documentos ou evidências relacionadas ao atendimento diretamente pelo aplicativo.')}
+    ${paragrafoHtml('Você poderá acompanhar as atualizações pelo aplicativo.')}`;
+
+  const conteudoTexto = `${assunto}
+
+Foi registrada uma contestação relacionada à consulta com ${pacienteNome}.
+
+Protocolo da disputa: ${protocolo}
+
+A FisioHelp analisará a solicitação e enviará uma resposta oficial em até 5 dias úteis.
+
+Você poderá apresentar informações, documentos ou evidências relacionadas ao atendimento diretamente pelo aplicativo.
+
+Você poderá acompanhar as atualizações pelo aplicativo.`;
+
+  return montarShell({ assunto, conteudoHtml, conteudoTexto });
+}
+
+function montarEmailChamadoAberto(dados = {}) {
+  const protocolo = texto(dados.protocoloTexto);
+  const assunto = 'Chamado aberto';
+  const trechoProtocolo = protocolo ? ` ${protocolo}` : '';
+
+  const conteudoHtml = `
+    <h1 style="margin:0 0 18px 0;color:#3D2B22;font-size:22px;line-height:1.3;font-weight:700;">${escapeHtml(assunto)}</h1>
+    ${paragrafoHtml(`Confirmamos o recebimento do seu chamado${trechoProtocolo}.`)}
+    ${paragrafoHtml('A FisioHelp analisará sua solicitação e enviará uma resposta oficial em até 5 dias úteis.')}
+    ${paragrafoHtml('Você poderá acompanhar as atualizações pelo aplicativo.')}`;
+
+  const conteudoTexto = `${assunto}
+
+Confirmamos o recebimento do seu chamado${trechoProtocolo}.
+
+A FisioHelp analisará sua solicitação e enviará uma resposta oficial em até 5 dias úteis.
+
+Você poderá acompanhar as atualizações pelo aplicativo.`;
+
+  return montarShell({ assunto, conteudoHtml, conteudoTexto });
+}
+
 export function montarEmailNotificacao({ titulo, mensagem, dados = null } = {}) {
+  if (dados?.emailModelo === 'consulta_cancelada_paciente') {
+    return montarEmailConsultaCanceladaPaciente(dados);
+  }
+
+  if (dados?.emailModelo === 'disputa_aberta_paciente') {
+    return montarEmailDisputaAbertaPaciente(dados);
+  }
+
+  if (dados?.emailModelo === 'disputa_aberta_fisioterapeuta') {
+    return montarEmailDisputaAbertaFisioterapeuta(dados);
+  }
+
+  if (dados?.emailModelo === 'chamado_aberto') {
+    return montarEmailChamadoAberto(dados);
+  }
+
   if (dados?.tipo === 'pagamento_consulta_confirmado') {
     return montarEmailPagamentoConsulta(dados);
   }
@@ -310,13 +466,12 @@ export function montarEmailNotificacao({ titulo, mensagem, dados = null } = {}) 
   const assunto = normalizarAssunto(titulo);
   const mensagemTexto = normalizarMensagem(mensagem);
   const assuntoHtml = escapeHtml(assunto);
-  const mensagemHtml = escapeHtml(mensagemTexto || 'Você recebeu uma nova mensagem da FisioHelp.');
 
   return montarShell({
     assunto,
     conteudoHtml: `
       <h1 style="margin:0 0 16px 0;color:#3D2B22;font-size:22px;line-height:1.3;font-weight:700;">${assuntoHtml}</h1>
-      <div style="color:#3D2B22;font-size:16px;line-height:1.6;white-space:pre-line;">${mensagemHtml}</div>`,
+      <div style="color:#3D2B22;font-size:16px;line-height:1.6;white-space:pre-line;">${textoMensagemHtml(mensagemTexto || 'Você recebeu uma nova mensagem da FisioHelp.')}</div>`,
     conteudoTexto: `${assunto}
 
 ${mensagemTexto || 'Você recebeu uma nova mensagem da FisioHelp.'}`,
@@ -326,4 +481,5 @@ ${mensagemTexto || 'Você recebeu uma nova mensagem da FisioHelp.'}`,
 export default {
   montarEmailNotificacao,
   escapeHtml,
+  montarShell,
 };

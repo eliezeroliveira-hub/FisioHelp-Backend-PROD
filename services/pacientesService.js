@@ -2,9 +2,12 @@
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import path from 'path';
-import contatoProvider from '../providers/contatoProvider.js';
 import { sql } from '../config/dbConfig.js';
+import { log } from '../config/logger.js';
 import { queryWithContext } from './_queryWithContext.js';
+import { montarEmailVerificacaoPaciente } from './contatoTemplates.js';
+import { solicitarVerificacaoContatoInterna } from './verificacaoContatoService.js';
+import { authService } from './authService.js';
 import { HttpError } from '../utils/httpError.js';
 import { getContatoSecret } from '../utils/contactSecret.js';
 import { isValidCPF, isValidEmail, normalizeEmail } from '../utils/identityValidators.js';
@@ -420,9 +423,132 @@ export const pacientesService = {
 
       const novo = result.recordset?.[0] || null;
       if (novo) delete novo.SenhaHash;
+      if (novo?.Id) {
+        try {
+          const verificacao = await solicitarVerificacaoContatoInterna({
+            usuarioTipo: 'Paciente',
+            usuarioId: novo.Id,
+            canal: 'Email',
+            expiraEmMinutos: 10,
+            montarConteudo: ({ codigo, usuario, expiraEmMinutos }) => montarEmailVerificacaoPaciente({
+              nome: usuario?.Nome || novo.Nome,
+              codigo,
+              expiraEmMinutos,
+            }),
+          });
+          novo.verificacaoEmailEnviada = true;
+          novo.destinoEmailVerificacao = verificacao.destinoMascarado;
+          if (verificacao.codigoDev) novo.codigoDev = verificacao.codigoDev;
+        } catch (err) {
+          log('warn', 'Falha ao enviar e-mail de verificação no cadastro de paciente', {
+            pacienteId: novo.Id,
+            erro: err?.message,
+          });
+          novo.verificacaoEmailEnviada = false;
+        }
+      }
       return novo;
     } catch (e) {
       throw mapUniqueError(e);
+    }
+  },
+
+  async ativarPreCadastro(payload = {}, reqLike = null) {
+    const CPF = normalizeDigits(payload?.cpf ?? payload?.CPF);
+    const Email = normalizeEmail(payload?.email ?? payload?.Email);
+    const NovaSenha = String(payload?.novaSenha ?? payload?.NovaSenha ?? payload?.senha ?? payload?.Senha ?? '');
+
+    if (!CPF || !Email || !NovaSenha) {
+      throw httpError('Campos obrigatórios: CPF, e-mail e nova senha.', 400);
+    }
+    if (CPF.length !== 11 || !isValidCPF(CPF)) {
+      throw httpError('CPF inválido.', 400);
+    }
+    validateEmail(Email);
+    validatePasswordStrength(NovaSenha);
+
+    const senhaHash = await bcrypt.hash(NovaSenha, 12);
+
+    try {
+      const ativacao = await queryWithContext(
+        null,
+        (req) => req
+          .input('CPF', sql.NVarChar(40), CPF)
+          .input('Email', sql.NVarChar(300), Email)
+          .input('SenhaHash', sql.NVarChar(256), senhaHash),
+        `
+          SET XACT_ABORT ON;
+          BEGIN TRAN;
+
+          DECLARE @PacienteId INT;
+          DECLARE @OrigemCadastro NVARCHAR(40);
+          DECLARE @Ativo BIT;
+          DECLARE @IsBloqueado BIT;
+
+          SELECT TOP 1
+            @PacienteId = Id,
+            @OrigemCadastro = OrigemCadastro,
+            @Ativo = Ativo,
+            @IsBloqueado = IsBloqueado
+          FROM dbo.Pacientes WITH (UPDLOCK, HOLDLOCK)
+          WHERE CPF = @CPF
+            AND LOWER(LTRIM(RTRIM(Email))) = @Email;
+
+          IF @PacienteId IS NULL
+            THROW 52010, N'Pré-cadastro não encontrado para os dados informados.', 1;
+
+          IF ISNULL(@Ativo, 0) = 0
+            THROW 52011, N'Conta de paciente desativada.', 1;
+
+          IF ISNULL(@IsBloqueado, 0) = 1
+            THROW 52012, N'Conta de paciente bloqueada.', 1;
+
+          IF @OrigemCadastro = N'PreCadastroFisioAtivado'
+            THROW 52013, N'Este pré-cadastro já foi ativado. Entre com seu CPF ou e-mail e senha.', 1;
+
+          IF @OrigemCadastro = N'Direto'
+            THROW 52014, N'Este CPF e e-mail já pertencem a uma conta criada diretamente, não a um pré-cadastro feito por fisioterapeuta. Entre pelo login do app.', 1;
+
+          IF ISNULL(@OrigemCadastro, N'') <> N'PreCadastroFisio'
+            THROW 52015, N'Esta conta não está disponível para ativação de pré-cadastro. Entre pelo login do app.', 1;
+
+          UPDATE dbo.Pacientes
+          SET SenhaHash = @SenhaHash,
+              OrigemCadastro = N'PreCadastroFisioAtivado'
+          WHERE Id = @PacienteId
+            AND OrigemCadastro = N'PreCadastroFisio';
+
+          SELECT TOP 1
+            Id,
+            Nome,
+            Email,
+            CPF,
+            OrigemCadastro
+          FROM dbo.Pacientes
+          WHERE Id = @PacienteId;
+
+          COMMIT;
+        `
+      );
+
+      const row = ativacao.recordset?.[0];
+      if (!row?.Id) {
+        throw httpError('Não foi possível ativar o pré-cadastro.', 500);
+      }
+
+      return authService.login({ cpf: CPF, senha: NovaSenha }, reqLike);
+    } catch (e) {
+      const msg = String(e?.message || '');
+      if (
+        msg.includes('Pré-cadastro não encontrado') ||
+        msg.includes('Conta de paciente') ||
+        msg.includes('pré-cadastro já foi ativado') ||
+        msg.includes('conta criada diretamente') ||
+        msg.includes('não está disponível para ativação de pré-cadastro')
+      ) {
+        throw httpError(msg, msg.includes('bloqueada') || msg.includes('desativada') ? 403 : 400);
+      }
+      throw e;
     }
   },
 
@@ -863,146 +989,19 @@ export const pacientesService = {
     if (!canal) {
       throw httpError("Canal inválido. Use 'Email' ou 'Telefone'.", 400);
     }
-    const destinoInformadoRaw = payload?.destino ?? payload?.Destino ?? null;
-
-    // Sempre usa o contato atualmente cadastrado no perfil.
-    const resultDestino = await queryWithContext(
-      usuario,
-      (req) => {
-        req.input('Id', sql.Int, pacienteId);
-      },
-      `
-        SELECT TOP 1
-          Email,
-          Telefone
-        FROM dbo.Pacientes
-        WHERE Id = @Id;
-      `,
-      { requireContext: true }
-    );
-
-    const row = resultDestino?.recordset?.[0];
-    const destino = canal === 'Email' ? row?.Email : row?.Telefone;
-
-    if (!destino) {
-      throw httpError(`Destino não encontrado para o canal ${canal}. Atualize seus dados antes de solicitar a verificação.`, 400);
-    }
-
-    const destinoNormalizado = normalizeDestinoContato(canal, destino);
-    if (!destinoNormalizado) {
-      throw httpError('Destino inválido para o canal informado.', 400);
-    }
-    if (destinoInformadoRaw !== null && destinoInformadoRaw !== undefined && String(destinoInformadoRaw).trim()) {
-      const destinoInformadoNormalizado = normalizeDestinoContato(canal, destinoInformadoRaw);
-      if (!destinoInformadoNormalizado) {
-        throw httpError('Destino inválido para o canal informado.', 400);
-      }
-      if (destinoInformadoNormalizado !== destinoNormalizado) {
-        throw httpError(
-          `Por segurança, a verificação só pode ser enviada para o ${canal === 'Email' ? 'e-mail' : 'telefone'} cadastrado no seu perfil.`,
-          400
-        );
-      }
-    }
-
-    const codigo = gerarCodigo6();
-    const salt = gerarSalt16();
-    const codigoHash = calcularCodigoHash({ canal, destinoNormalizado, codigo, salt });
-
-    const expiraEm = new Date(Date.now() + 10 * 60 * 1000); // 10 min
-
-    const throttle = await queryWithContext(
-      usuario,
-      (req) => {
-        req.input('PacienteId', sql.Int, pacienteId);
-        req.input('Canal', sql.NVarChar(40), canal);
-        req.input('Destino', sql.NVarChar(510), destinoNormalizado);
-        req.input('CodigoHash', sql.VarBinary(32), codigoHash);
-        req.input('CodigoSalt', sql.VarBinary(16), salt);
-        req.input('ExpiraEm', sql.DateTime2(7), expiraEm);
-        req.input('MaxTentativas', sql.SmallInt, 5);
-        req.input('CooldownSegundos', sql.Int, VERIFICACAO_CONTATO_COOLDOWN_SEGUNDOS);
-      },
-      `
-        SET NOCOUNT ON;
-        SET XACT_ABORT ON;
-
-        BEGIN TRAN;
-
-        DECLARE @UltimoEnvioEm DATETIME2(7) = NULL;
-        SELECT TOP 1 @UltimoEnvioEm = UltimoEnvioEm
-        FROM dbo.VerificacoesContato WITH (UPDLOCK, HOLDLOCK)
-        WHERE PacienteId = @PacienteId
-          AND Canal = @Canal;
-
-        IF (@UltimoEnvioEm IS NOT NULL AND DATEDIFF(SECOND, @UltimoEnvioEm, SYSDATETIME()) < @CooldownSegundos)
-        BEGIN
-          SELECT
-            CAST(0 AS BIT) AS PodeEnviar,
-            DATEADD(SECOND, @CooldownSegundos, @UltimoEnvioEm) AS PodeReenviarEm;
-          COMMIT;
-          RETURN;
-        END
-
-        MERGE dbo.VerificacoesContato AS t
-        USING (SELECT @PacienteId AS PacienteId, @Canal AS Canal) AS s
-          ON t.PacienteId = s.PacienteId AND t.Canal = s.Canal
-        WHEN MATCHED THEN
-          UPDATE SET
-            Destino = @Destino,
-            CodigoHash = @CodigoHash,
-            CodigoSalt = @CodigoSalt,
-            ExpiraEm = @ExpiraEm,
-            Tentativas = 0,
-            MaxTentativas = @MaxTentativas,
-            Status = N'Pendente',
-            UltimoEnvioEm = SYSDATETIME(),
-            ConfirmadoEm = NULL
-        WHEN NOT MATCHED THEN
-          INSERT (PacienteId, Canal, Destino, CodigoHash, CodigoSalt, ExpiraEm, Tentativas, MaxTentativas, Status, CriadoEm, UltimoEnvioEm)
-          VALUES (@PacienteId, @Canal, @Destino, @CodigoHash, @CodigoSalt, @ExpiraEm, 0, @MaxTentativas, N'Pendente', SYSDATETIME(), SYSDATETIME());
-
-        SELECT
-          CAST(1 AS BIT) AS PodeEnviar,
-          CAST(NULL AS DATETIME2(7)) AS PodeReenviarEm;
-
-        COMMIT;
-      `,
-      { requireContext: true }
-    );
-
-    const podeEnviar = throttle?.recordset?.[0]?.PodeEnviar;
-    if (Number(podeEnviar) !== 1) {
-      const podeReenviarEm = throttle?.recordset?.[0]?.PodeReenviarEm
-        ? new Date(throttle.recordset[0].PodeReenviarEm)
-        : null;
-      const quando = podeReenviarEm && !Number.isNaN(podeReenviarEm.getTime())
-        ? ` Tente novamente após ${podeReenviarEm.toLocaleString('pt-BR')}.`
-        : '';
-      throw httpError(`Muitas solicitações para este canal.${quando}`, 429);
-    }
-
-    const destinoMascarado = contatoProvider?.mascararDestino
-      ? contatoProvider.mascararDestino(canal, destinoNormalizado)
-      : destinoNormalizado;
-
-    const envio = await contatoProvider.enviarCodigo({
+    return solicitarVerificacaoContatoInterna({
+      usuarioTipo: 'Paciente',
+      usuarioId: pacienteId,
       canal,
-      destino: destinoNormalizado,
-      destinoMascarado,
-      codigo,
-      contexto: { tipo: 'Paciente', id: Number(pacienteId) },
+      destinoInformado: payload?.destino ?? payload?.Destino ?? null,
+      expiraEmMinutos: 10,
+      usuario,
+      montarConteudo: ({ codigo, usuario: usuarioContato, expiraEmMinutos }) => montarEmailVerificacaoPaciente({
+        nome: usuarioContato?.Nome,
+        codigo,
+        expiraEmMinutos,
+      }),
     });
-    if (!envio?.ok) {
-      throw httpError('Falha ao enviar código de verificação. Tente novamente.', 503);
-    }
-
-    return {
-      canal,
-      destinoMascarado,
-      expiraEm,
-      ...(envio?.codigo ? { codigoDev: envio.codigo } : {}),
-    };
   },
 
   async confirmarVerificacaoContato(usuario, pacienteId, payload = {}) {

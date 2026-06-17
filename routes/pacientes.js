@@ -8,6 +8,7 @@ const router = express.Router();
 
 // Cadastro público
 router.post('/', pacientesController.criar);
+router.post('/ativar-pre-cadastro', pacientesController.ativarPreCadastro);
 
 // A partir daqui, tudo exige autenticação (garante req.usuario)
 router.use(autenticarJWT);

@@ -1,11 +1,21 @@
 // providers/contatoProvider.js
-// Provider "plugável" para envio de códigos de verificação (Email/Telefone).
-// Em DEV (NODE_ENV !== 'production'), apenas retorna o código no retorno para facilitar testes no Postman.
-// Em PROD, implemente aqui a integração (SendGrid, SES, Twilio, Zenvia, WhatsApp etc).
+// Provider plugável para envio síncrono de códigos de verificação.
+import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
+import { ENV } from '../config/env.js';
 import { log } from '../config/logger.js';
 
-function isProd() {
-  return String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+const MODE = String(ENV.CONTATO_PROVIDER_MODE || 'stub').trim().toLowerCase();
+
+export const isContatoProviderReal = MODE === 'ses';
+
+let sesClient = null;
+
+function getSesClient() {
+  if (!sesClient) {
+    sesClient = new SESv2Client({ region: ENV.AWS_REGION || 'sa-east-1' });
+  }
+
+  return sesClient;
 }
 
 function mascararDestino(canal, destino) {
@@ -26,25 +36,167 @@ function mascararDestino(canal, destino) {
   return `****${digits.slice(-4)}`;
 }
 
-async function enviarCodigo({ canal, destino, codigo }) {
-  // TODO: implementar integração real quando houver provedor.
-  // Ex.: Email: SendGrid/SES. Telefone: Twilio/Zenvia/WhatsApp Cloud API.
-  if (!isProd()) {
-    console.log(`[DEV] Código de verificação (${canal}) para ${destino}: ${codigo}`);
-    return { ok: true, modo: 'dev', codigo };
+function textoFallback(codigo) {
+  return `Seu codigo de verificacao FisioHelp e: ${codigo}`;
+}
+
+function buildEmailBody({ html, texto }) {
+  const textBody = String(texto || '').trim();
+  const body = {
+    Text: {
+      Charset: 'UTF-8',
+      Data: textBody,
+    },
+  };
+
+  if (html && String(html).trim()) {
+    body.Html = {
+      Charset: 'UTF-8',
+      Data: String(html),
+    };
   }
 
-  // Em produção, por padrão falha explicitamente para você não achar que está enviando.
-  const erro = 'Provider de contato não configurado (produção).';
-  log('error', 'Falha ao enviar código de verificação', {
-    canal,
-    destinoMascarado: mascararDestino(canal, destino),
-    erro
-  });
-  throw new Error(erro);
+  return body;
+}
+
+function sanitizeSubject(assunto, fallback) {
+  return String(assunto || fallback).replace(/[\r\n]+/g, ' ').trim();
+}
+
+async function enviarEmail({ destino, assunto, html, texto }) {
+  const canalNorm = 'Email';
+  const destinoMascarado = mascararDestino(canalNorm, destino);
+  const subject = sanitizeSubject(assunto, 'Mensagem FisioHelp');
+  const textBody = String(texto || '').trim();
+
+  if (MODE === 'stub') {
+    log('info', '[contatoProvider:stub] E-mail transacional gerado', {
+      canal: canalNorm,
+      destinoMascarado,
+      assunto: subject,
+    });
+    return { ok: true, modo: 'stub' };
+  }
+
+  if (MODE !== 'ses') {
+    throw new Error(`CONTATO_PROVIDER_MODE inválido: ${MODE}`);
+  }
+
+  if (!destino || !String(destino).trim()) {
+    throw new Error('Destino de e-mail não informado.');
+  }
+  if (!textBody && (!html || !String(html).trim())) {
+    throw new Error('Conteúdo do e-mail não informado.');
+  }
+
+  try {
+    await getSesClient().send(new SendEmailCommand({
+      FromEmailAddress: ENV.EMAIL_FROM,
+      Destination: {
+        ToAddresses: [String(destino).trim()],
+      },
+      ReplyToAddresses: ENV.EMAIL_REPLY_TO ? [ENV.EMAIL_REPLY_TO] : undefined,
+      Content: {
+        Simple: {
+          Subject: {
+            Charset: 'UTF-8',
+            Data: subject,
+          },
+          Body: buildEmailBody({ html, texto: textBody }),
+        },
+      },
+    }));
+
+    log('info', 'E-mail transacional enviado por SES', {
+      canal: canalNorm,
+      destinoMascarado,
+      assunto: subject,
+    });
+
+    return { ok: true, modo: 'ses' };
+  } catch (err) {
+    log('error', 'Falha ao enviar e-mail transacional por SES', {
+      canal: canalNorm,
+      destinoMascarado,
+      assunto: subject,
+      erro: err?.message,
+      name: err?.name,
+      statusCode: err?.$metadata?.httpStatusCode,
+    });
+    throw err;
+  }
+}
+
+async function enviarCodigo({ canal, destino, codigo, assunto, html, texto }) {
+  const canalNorm = String(canal || '').trim();
+  const destinoMascarado = mascararDestino(canalNorm, destino);
+  const subject = sanitizeSubject(assunto, 'Código de verificação FisioHelp');
+  const textBody = String(texto || textoFallback(codigo)).trim();
+  const isProd = String(ENV.NODE_ENV || '').toLowerCase() === 'production';
+
+  if (MODE === 'stub') {
+    log('info', '[contatoProvider:stub] Código de verificação gerado', {
+      canal: canalNorm,
+      destinoMascarado,
+      assunto: subject,
+      ...(isProd ? {} : { codigo }),
+    });
+    return { ok: true, modo: 'stub', ...(isProd ? {} : { codigo }) };
+  }
+
+  if (MODE !== 'ses') {
+    throw new Error(`CONTATO_PROVIDER_MODE inválido: ${MODE}`);
+  }
+
+  if (canalNorm !== 'Email') {
+    throw new Error(`Canal ${canalNorm} não suportado pelo contatoProvider SES.`);
+  }
+
+  if (!destino || !String(destino).trim()) {
+    throw new Error('Destino de e-mail não informado.');
+  }
+
+  try {
+    await getSesClient().send(new SendEmailCommand({
+      FromEmailAddress: ENV.EMAIL_FROM,
+      Destination: {
+        ToAddresses: [String(destino).trim()],
+      },
+      ReplyToAddresses: ENV.EMAIL_REPLY_TO ? [ENV.EMAIL_REPLY_TO] : undefined,
+      Content: {
+        Simple: {
+          Subject: {
+            Charset: 'UTF-8',
+            Data: subject,
+          },
+          Body: buildEmailBody({ html, texto: textBody }),
+        },
+      },
+    }));
+
+    log('info', 'Código de verificação enviado por SES', {
+      canal: canalNorm,
+      destinoMascarado,
+      assunto: subject,
+    });
+
+    return { ok: true, modo: 'ses' };
+  } catch (err) {
+    log('error', 'Falha ao enviar código de verificação por SES', {
+      canal: canalNorm,
+      destinoMascarado,
+      assunto: subject,
+      erro: err?.message,
+      name: err?.name,
+      statusCode: err?.$metadata?.httpStatusCode,
+    });
+    throw err;
+  }
 }
 
 export default {
   enviarCodigo,
+  enviarEmail,
   mascararDestino,
+  isContatoProviderReal,
 };

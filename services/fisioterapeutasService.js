@@ -1,9 +1,15 @@
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
-import contatoProvider from '../providers/contatoProvider.js';
 import { sql } from '../config/dbConfig.js';
+import { log } from '../config/logger.js';
 import { queryWithContext } from './_queryWithContext.js';
 import { obterPendenciaAvaliacaoFisioterapeuta } from './avaliacoesService.js';
+import {
+  montarEmailConvitePreCadastroSimples,
+  montarEmailVerificacaoFisioterapeuta,
+} from './contatoTemplates.js';
+import { solicitarVerificacaoContatoInterna } from './verificacaoContatoService.js';
+import contatoProvider from '../providers/contatoProvider.js';
 import { HttpError } from '../utils/httpError.js';
 import { getContatoSecret } from '../utils/contactSecret.js';
 import { isValidCNPJ, isValidCPF, isValidEmail, normalizeEmail as normalizeEmailAddress } from '../utils/identityValidators.js';
@@ -1564,6 +1570,31 @@ const fisioterapeutasService = {
       }
     }
 
+    if (novoId) {
+      try {
+        const verificacao = await solicitarVerificacaoContatoInterna({
+          usuarioTipo: 'Fisioterapeuta',
+          usuarioId: novoId,
+          canal: 'Email',
+          expiraEmMinutos: 10,
+          montarConteudo: ({ codigo, usuario, expiraEmMinutos }) => montarEmailVerificacaoFisioterapeuta({
+            nome: usuario?.Nome || fisio?.Nome || Nome,
+            codigo,
+            expiraEmMinutos,
+          }),
+        });
+        fisio.verificacaoEmailEnviada = true;
+        fisio.destinoEmailVerificacao = verificacao.destinoMascarado;
+        if (verificacao.codigoDev) fisio.codigoDev = verificacao.codigoDev;
+      } catch (err) {
+        log('warn', 'Falha ao enviar e-mail de verificação no cadastro de fisioterapeuta', {
+          fisioterapeutaId: novoId,
+          erro: err?.message,
+        });
+        fisio.verificacaoEmailEnviada = false;
+      }
+    }
+
     return fisio;
     } catch (e) {
       throw mapFisioterapeutaCreateError(e);
@@ -2561,9 +2592,79 @@ const fisioterapeutasService = {
     }
 
     const row = result.recordset?.[0] ?? null;
+    const pacienteId = Number(
+      row?.PacienteId ??
+      row?.pacienteId ??
+      row?.Id ??
+      row?.id ??
+      row?.PacienteID ??
+      0
+    );
+
+    let pacienteConvite = row;
+    if (!pacienteConvite?.Email || !pacienteConvite?.Nome || !pacienteId) {
+      const pacienteRes = await queryWithContext(
+        null,
+        (req) => {
+          req.input('PacienteId', sql.Int, pacienteId || null);
+          req.input('CPF', sql.NVarChar(40), cpf);
+          req.input('Email', sql.NVarChar(300), emailNorm);
+        },
+        `
+          SELECT TOP 1
+            Id AS PacienteId,
+            Nome,
+            Email
+          FROM dbo.Pacientes
+          WHERE (@PacienteId IS NOT NULL AND Id = @PacienteId)
+             OR (@PacienteId IS NULL AND CPF = @CPF AND Email = @Email)
+          ORDER BY Id DESC;
+        `
+      );
+      pacienteConvite = pacienteRes.recordset?.[0] || pacienteConvite;
+    }
+
+    let conviteEmailEnviado = false;
+    let destinoConviteMascarado = null;
+    const destinoConvite = pacienteConvite?.Email || emailNorm;
+    if (destinoConvite) {
+      try {
+        const fisioRes = await queryWithContext(
+          null,
+          (req) => req.input('FisioterapeutaId', sql.Int, Number(fisioterapeutaId)),
+          `
+            SELECT TOP 1 Nome
+            FROM dbo.Fisioterapeutas
+            WHERE Id = @FisioterapeutaId;
+          `
+        );
+        const nomeFisioterapeuta = fisioRes.recordset?.[0]?.Nome || 'Seu fisioterapeuta';
+        const template = montarEmailConvitePreCadastroSimples({
+          nomePaciente: pacienteConvite?.Nome || nome,
+          nomeFisioterapeuta,
+        });
+        const envio = await contatoProvider.enviarEmail({
+          destino: destinoConvite,
+          assunto: template.assunto,
+          html: template.corpoHtml || template.html,
+          texto: template.corpoTexto || template.texto,
+        });
+
+        conviteEmailEnviado = Boolean(envio?.ok);
+        destinoConviteMascarado = contatoProvider.mascararDestino('Email', destinoConvite);
+      } catch (err) {
+        log('warn', 'Falha ao enviar convite de pré-cadastro de paciente', {
+          fisioterapeutaId: Number(fisioterapeutaId),
+          pacienteId: pacienteId || null,
+          erro: err?.message,
+        });
+      }
+    }
 
     return {
       ...(row || {}),
+      conviteEmailEnviado,
+      destinoConviteMascarado,
       mensagem: 'Paciente pré-cadastrado com sucesso.'
     };
   },
@@ -2692,136 +2793,19 @@ const fisioterapeutasService = {
       throw new HttpError(400, "Canal inválido. Use 'Email' ou 'Telefone'.");
     }
 
-    const destinoRes = await queryWithContext(
-      safeUsuario(usuario),
-      (req) => {
-        req.input('FisioterapeutaId', sql.Int, toIntOrNull(fisioterapeutaId));
-      },
-      `
-        SELECT TOP 1
-          Email,
-          Telefone
-        FROM dbo.Fisioterapeutas
-        WHERE Id = @FisioterapeutaId;
-      `,
-      { requireContext: true }
-    );
-
-    const rowDestino = destinoRes?.recordset?.[0];
-    const destino = canalNorm === 'Email' ? rowDestino?.Email : rowDestino?.Telefone;
-    if (!destino) {
-      throw new HttpError(400, `Destino não encontrado para o canal ${canalNorm}. Atualize seus dados antes de solicitar a verificação.`);
-    }
-
-    const destinoNormalizado = normalizeDestinoContato(canalNorm, destino);
-    if (!destinoNormalizado) {
-      throw new HttpError(400, 'Destino inválido para o canal informado.');
-    }
-
-    const codigo = gerarCodigo6();
-    const salt = gerarSalt16();
-    const secret = getContatoSecret();
-    const codigoHash = calcularCodigoHash(secret, salt, canalNorm, codigo, destinoNormalizado);
-
-    const expiraEm = new Date(Date.now() + 10 * 60 * 1000); // 10 minutos
-    const maxTentativas = 5;
-
-    const upsertQuery = `
-      SET NOCOUNT ON;
-      SET XACT_ABORT ON;
-
-      BEGIN TRAN;
-
-      DECLARE @UltimoEnvioEm DATETIME2(7) = NULL;
-      SELECT TOP 1 @UltimoEnvioEm = UltimoEnvioEm
-      FROM dbo.VerificacoesContato WITH (UPDLOCK, HOLDLOCK)
-      WHERE FisioterapeutaId = @FisioterapeutaId
-        AND Canal = @Canal;
-
-      IF (@UltimoEnvioEm IS NOT NULL AND DATEDIFF(SECOND, @UltimoEnvioEm, SYSDATETIME()) < @CooldownSegundos)
-      BEGIN
-        SELECT
-          CAST(0 AS BIT) AS PodeEnviar,
-          DATEADD(SECOND, @CooldownSegundos, @UltimoEnvioEm) AS PodeReenviarEm,
-          CAST(NULL AS DATETIME2(7)) AS ExpiraEm;
-        COMMIT;
-        RETURN;
-      END
-
-      MERGE dbo.VerificacoesContato AS t
-      USING (SELECT @FisioterapeutaId AS FisioterapeutaId, @Canal AS Canal) AS s
-        ON t.FisioterapeutaId = s.FisioterapeutaId AND t.Canal = s.Canal
-      WHEN MATCHED THEN
-        UPDATE SET
-          Destino = @Destino,
-          CodigoHash = @CodigoHash,
-          CodigoSalt = @CodigoSalt,
-          ExpiraEm = @ExpiraEm,
-          Tentativas = 0,
-          MaxTentativas = @MaxTentativas,
-          Status = N'Pendente',
-          UltimoEnvioEm = SYSDATETIME(),
-          ConfirmadoEm = NULL
-      WHEN NOT MATCHED THEN
-        INSERT (FisioterapeutaId, Canal, Destino, CodigoHash, CodigoSalt, ExpiraEm, Tentativas, MaxTentativas, Status, CriadoEm, UltimoEnvioEm)
-        VALUES (@FisioterapeutaId, @Canal, @Destino, @CodigoHash, @CodigoSalt, @ExpiraEm, 0, @MaxTentativas, N'Pendente', SYSDATETIME(), SYSDATETIME());
-
-      SELECT TOP 1
-        CAST(1 AS BIT) AS PodeEnviar,
-        CAST(NULL AS DATETIME2(7)) AS PodeReenviarEm,
-        ExpiraEm
-      FROM dbo.VerificacoesContato
-      WHERE FisioterapeutaId = @FisioterapeutaId AND Canal = @Canal;
-
-      COMMIT;
-    `;
-
-    const res = await queryWithContext(safeUsuario(usuario),
-      (req) => {
-        req.input('FisioterapeutaId', sql.Int, toIntOrNull(fisioterapeutaId));
-        req.input('Canal', sql.NVarChar(40), canalNorm);
-        req.input('Destino', sql.NVarChar(510), destinoNormalizado);
-        req.input('CodigoHash', sql.VarBinary(32), codigoHash);
-        req.input('CodigoSalt', sql.VarBinary(16), salt);
-        req.input('ExpiraEm', sql.DateTime2(7), expiraEm);
-        req.input('MaxTentativas', sql.SmallInt, maxTentativas);
-        req.input('CooldownSegundos', sql.Int, VERIFICACAO_CONTATO_COOLDOWN_SEGUNDOS);
-      },
-      upsertQuery,
-      { requireContext: true }
-    );
-
-    const row = res?.recordset?.[0] ?? null;
-    const podeEnviar = Number(row?.PodeEnviar ?? 0) === 1;
-    if (!podeEnviar) {
-      const podeReenviarEm = row?.PodeReenviarEm ? new Date(row.PodeReenviarEm) : null;
-      const quando = (podeReenviarEm && !Number.isNaN(podeReenviarEm.getTime()))
-        ? ` Tente novamente após ${podeReenviarEm.toLocaleString('pt-BR')}.`
-        : '';
-      throw new HttpError(429, `Muitas solicitações para este canal.${quando}`);
-    }
-
-    const envio = await contatoProvider.enviarCodigo({
+    return solicitarVerificacaoContatoInterna({
+      usuarioTipo: 'Fisioterapeuta',
+      usuarioId: fisioterapeutaId,
       canal: canalNorm,
-      destino: destinoNormalizado,            //  destino real
-      destinoMascarado: contatoProvider?.mascararDestino
-        ? contatoProvider.mascararDestino(canalNorm, destinoNormalizado)
-        : destinoNormalizado,                 //  opcional (pra log/preview)
-      codigo,
-      contexto: { tipo: 'Fisioterapeuta', id: Number(fisioterapeutaId) },
+      destinoInformado: dados?.destino ?? dados?.Destino ?? null,
+      expiraEmMinutos: 10,
+      usuario: safeUsuario(usuario),
+      montarConteudo: ({ codigo, usuario: usuarioContato, expiraEmMinutos }) => montarEmailVerificacaoFisioterapeuta({
+        nome: usuarioContato?.Nome,
+        codigo,
+        expiraEmMinutos,
+      }),
     });
-    if (!envio?.ok) {
-      throw new HttpError(503, 'Falha ao enviar código de verificação. Tente novamente.');
-    }
-
-    return {
-      canal: canalNorm,
-      destinoMascarado: contatoProvider?.mascararDestino
-        ? contatoProvider.mascararDestino(canalNorm, destinoNormalizado)
-        : destinoNormalizado,
-      expiraEm: row?.ExpiraEm ?? expiraEm,
-      ...(envio?.codigo ? { codigoDev: envio.codigo } : {}),
-    };
 
   },
 

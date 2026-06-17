@@ -2908,7 +2908,7 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
       origemAcao: 'consultas.cancelar.paciente',
     });
 
-    void notificacoesDispatch.consultaCancelada({ consultaId: id, motivo });
+    void notificacoesDispatch.consultaCancelada({ consultaId: id, motivo, origem: 'paciente' });
 
     return {
       consulta,
@@ -3060,7 +3060,7 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
     origemAcao: 'consultas.cancelar.admin',
   });
 
-  void notificacoesDispatch.consultaCancelada({ consultaId: id, motivo });
+  void notificacoesDispatch.consultaCancelada({ consultaId: id, motivo, origem: 'admin' });
 
   return { consulta, retorno: null };
 },
@@ -3335,7 +3335,7 @@ async reagendar(consultaId, body, usuario) {
         origemAcao: 'consultas.cancelarArrependimento7Dias.creditoLivre',
       });
 
-      void notificacoesDispatch.consultaCancelada({ consultaId: cid, motivo });
+      void notificacoesDispatch.consultaCancelada({ consultaId: cid, motivo, origem: 'paciente' });
 
       return {
         Sucesso: row?.Sucesso ?? true,
@@ -3424,7 +3424,7 @@ async reagendar(consultaId, body, usuario) {
         origemAcao: 'consultas.cancelarArrependimento7Dias.reembolsoAsaas',
       });
 
-      void notificacoesDispatch.consultaCancelada({ consultaId: cid, motivo });
+      void notificacoesDispatch.consultaCancelada({ consultaId: cid, motivo, origem: 'paciente' });
 
       return {
         Sucesso: row?.Sucesso ?? true,
@@ -3496,7 +3496,7 @@ async reagendar(consultaId, body, usuario) {
       origemAcao: 'consultas.cancelarArrependimento7Dias',
     });
 
-      void notificacoesDispatch.consultaCancelada({ consultaId: cid, motivo });
+      void notificacoesDispatch.consultaCancelada({ consultaId: cid, motivo, origem: 'paciente' });
 
       return {
       Sucesso: row?.Sucesso ?? true,

@@ -102,9 +102,9 @@ async function enfileirar(destinatario, notificacao, { canal = 'push', gravarInb
   );
 }
 
-async function enfileirarPushEEmail(destinatario, notificacao) {
+async function enfileirarPushEEmail(destinatario, notificacao, { emailNotificacao = null } = {}) {
   const push = await enfileirar(destinatario, notificacao);
-  const email = await enfileirar(destinatario, notificacao, { canal: 'email', gravarInbox: false });
+  const email = await enfileirar(destinatario, emailNotificacao ?? notificacao, { canal: 'email', gravarInbox: false });
   return push ?? email;
 }
 
@@ -535,7 +535,7 @@ async function consultaConcluida({ consultaId }) {
   });
 }
 
-async function consultaCancelada({ consultaId, motivo = null }) {
+async function consultaCancelada({ consultaId, motivo = null, origem = null }) {
   return safeDispatch('consultaCancelada', async () => {
     const consulta = await buscarConsultaResumo(consultaId);
     if (!consulta) return null;
@@ -543,6 +543,23 @@ async function consultaCancelada({ consultaId, motivo = null }) {
     const data = formatarDataHora(consulta.DataHora);
     const complemento = motivo ? ` Motivo: ${limitar(motivo, 120)}` : '';
     const payload = dadosBase('consulta_cancelada', { consultaId: Number(consulta.Id) });
+    const canceladoPeloPaciente = texto(origem).toLowerCase() === 'paciente';
+    const emailCancelamentoPaciente = canceladoPeloPaciente
+      ? {
+          tipo: 'Agendamento',
+          titulo: 'Cancelamento da consulta recebido',
+          mensagem: `Confirmamos o recebimento da sua solicitação de cancelamento referente à consulta ${Number(consulta.Id)}.`,
+          referenciaId: Number(consulta.Id),
+          dados: dadosBase('consulta_cancelada', {
+            ...payload,
+            emailModelo: 'consulta_cancelada_paciente',
+            consultaId: Number(consulta.Id),
+            dataConsultaTexto: data,
+            fisioterapeutaNome: consulta.FisioterapeutaNome ?? null,
+            fisioterapeutaCnpj: consulta.FisioterapeutaCnpj ?? null,
+          })
+        }
+      : null;
 
     await enfileirarPushEEmail(
       { usuarioTipo: 'Paciente', usuarioId: consulta.PacienteId },
@@ -552,7 +569,8 @@ async function consultaCancelada({ consultaId, motivo = null }) {
         mensagem: `Sua consulta${data ? ` de ${data}` : ''} foi cancelada.${complemento}`,
         referenciaId: Number(consulta.Id),
         dados: payload
-      }
+      },
+      { emailNotificacao: emailCancelamentoPaciente }
     );
 
     return enfileirarPushEEmail(
@@ -820,7 +838,8 @@ async function disputaAberta({ disputaId = null, consultaId = null }) {
 
     const payload = dadosBase('disputa_aberta', {
       disputaId: asId(disputa.Id),
-      consultaId: Number(disputa.ConsultaId)
+      consultaId: Number(disputa.ConsultaId),
+      pacienteNome: disputa.PacienteNome ?? null
     });
     const data = formatarDataHora(disputa.DataHora);
 
@@ -832,6 +851,15 @@ async function disputaAberta({ disputaId = null, consultaId = null }) {
         mensagem: `Sua disputa foi aberta referente à consulta ${Number(disputa.ConsultaId)}.`,
         referenciaId: Number(disputa.ConsultaId),
         dados: payload
+      },
+      {
+        emailNotificacao: {
+          tipo: 'Disputa',
+          titulo: 'Disputa aberta',
+          mensagem: `Confirmamos o recebimento da sua disputa referente à consulta ${Number(disputa.ConsultaId)}.`,
+          referenciaId: Number(disputa.ConsultaId),
+          dados: { ...payload, emailModelo: 'disputa_aberta_paciente' }
+        }
       }
     );
 
@@ -843,6 +871,15 @@ async function disputaAberta({ disputaId = null, consultaId = null }) {
         mensagem: `Uma contestação foi aberta para a consulta com ${primeiroNome(disputa.PacienteNome, 'o paciente')}.`,
         referenciaId: Number(disputa.ConsultaId),
         dados: payload
+      },
+      {
+        emailNotificacao: {
+          tipo: 'Disputa',
+          titulo: 'Disputa aberta',
+          mensagem: `Foi registrada uma contestação relacionada à consulta com ${primeiroNome(disputa.PacienteNome, 'o paciente')}.`,
+          referenciaId: Number(disputa.ConsultaId),
+          dados: { ...payload, emailModelo: 'disputa_aberta_fisioterapeuta' }
+        }
       }
     );
   });
@@ -898,6 +935,19 @@ async function chamadoAberto({ chamadoId }) {
         mensagem: `Recebemos seu chamado${chamado.ProtocoloTexto ? ` ${chamado.ProtocoloTexto}` : ''}.`,
         referenciaId: Number(chamado.Id),
         dados: dadosBase('chamado_aberto', { chamadoId: Number(chamado.Id) })
+      },
+      {
+        emailNotificacao: {
+          tipo: 'Chamado',
+          titulo: 'Chamado aberto',
+          mensagem: `Confirmamos o recebimento do seu chamado${chamado.ProtocoloTexto ? ` ${chamado.ProtocoloTexto}` : ''}.`,
+          referenciaId: Number(chamado.Id),
+          dados: dadosBase('chamado_aberto', {
+            chamadoId: Number(chamado.Id),
+            emailModelo: 'chamado_aberto',
+            protocoloTexto: chamado.ProtocoloTexto ?? null,
+          })
+        }
       }
     );
   });
@@ -971,16 +1021,41 @@ async function crefitoAprovado({ fisioterapeutaId }) {
     const fisio = await buscarFisioterapeutaResumo(fisioterapeutaId);
     if (!fisio) return null;
 
-    return enfileirarPushEEmail(
-      { usuarioTipo: 'Fisioterapeuta', usuarioId: fisio.Id },
+    const destinatario = { usuarioTipo: 'Fisioterapeuta', usuarioId: fisio.Id };
+    const dados = dadosBase('crefito_aprovado', { fisioterapeutaId: Number(fisio.Id) });
+
+    const push = await enfileirar(
+      destinatario,
       {
         tipo: 'Credenciamento',
         titulo: 'CREFITO verificado',
         mensagem: 'Seu CREFITO foi aprovado. Seu perfil já está ativo.',
         referenciaId: Number(fisio.Id),
-        dados: dadosBase('crefito_aprovado', { fisioterapeutaId: Number(fisio.Id) })
+        dados
       }
     );
+
+    const nome = String(fisio.Nome || 'Fisioterapeuta').trim();
+    const email = await enfileirar(
+      destinatario,
+      {
+        tipo: 'Credenciamento',
+        titulo: 'Seu CREFITO foi aprovado',
+        mensagem: `Olá, ${nome},
+
+Seu CREFITO foi verificado e aprovado com sucesso.
+
+Seu perfil já está ativo na FisioHelp. Agora você pode acessar a plataforma, revisar suas informações profissionais e começar a utilizar os recursos disponíveis para fisioterapeutas.
+
+Atenciosamente,
+Equipe FisioHelp`,
+        referenciaId: Number(fisio.Id),
+        dados
+      },
+      { canal: 'email', gravarInbox: false }
+    );
+
+    return push ?? email;
   });
 }
 

@@ -30,6 +30,7 @@ import getPool from './config/dbConfig.js';
 import { startReembolsosGatewayWorker } from './workers/reembolsosGatewayWorker.js';
 import { startRepassesGatewayWorker } from './workers/repassesGatewayWorker.js';
 import { startNotificacoesWorker } from './workers/notificacoesWorker.js';
+import { isContatoProviderReal } from './providers/contatoProvider.js';
 
 // 🔧 Inicialização
 const app = express();
@@ -170,6 +171,9 @@ app.use(errorHandler);
 app.listen(ENV.PORT, () => {
   log('info', `🚀 Servidor rodando na porta ${ENV.PORT} [${ENV.NODE_ENV}]`);
   log('info', `✅ http://localhost:${ENV.PORT}`);
+  if (ENV.NODE_ENV === 'production' && !isContatoProviderReal) {
+    log('warn', 'Provider de contato está em stub em produção. Códigos de verificação não serão enviados de verdade.');
+  }
   startReembolsosGatewayWorker();
   startRepassesGatewayWorker();
   startNotificacoesWorker();
