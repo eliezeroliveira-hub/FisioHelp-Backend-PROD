@@ -146,8 +146,46 @@ Equipe FisioHelp`;
   return montarShell({ assunto, conteudoHtml, conteudoTexto });
 }
 
+export function montarEmailRedefinicaoSenha({ nome, codigo, expiraEmMinutos = 10 } = {}) {
+  const nomeUsuario = primeiroNome(nome, 'usuario');
+  const expiracao = formatarExpiracao(expiraEmMinutos);
+  const assunto = 'Código para redefinir sua senha na FisioHelp';
+
+  const conteudoHtml = `
+    <h1 style="margin:0 0 18px 0;color:#3D2B22;font-size:22px;line-height:1.3;font-weight:700;">${escapeHtml(assunto)}</h1>
+    ${paragrafoHtml(`Olá, ${nomeUsuario},`)}
+    ${paragrafoHtml('Recebemos uma solicitação para redefinir a senha da sua conta FisioHelp.')}
+    ${paragrafoHtml('Use o código abaixo no app para criar uma nova senha:')}
+    ${blocoCodigoHtml('Código de redefinição', codigo)}
+    ${paragrafoHtml(`Este código expira em ${expiracao}.`)}
+    ${paragrafoHtml('No app FisioHelp, na tela de login, toque em "Esqueceu a senha?", informe seu e-mail e digite este código para criar uma nova senha.')}
+    ${paragrafoHtml('Se você não solicitou a redefinição de senha, ignore esta mensagem ou entre em contato pelo e-mail suporte@fisiohelp.com.br.')}
+    ${paragrafoHtml('Atenciosamente,')}
+    ${paragrafoHtml('Equipe FisioHelp')}`;
+
+  const conteudoTexto = `Olá, ${nomeUsuario},
+
+Recebemos uma solicitação para redefinir a senha da sua conta FisioHelp.
+
+Use o código abaixo no app para criar uma nova senha:
+
+Código de redefinição: ${codigo}
+
+Este código expira em ${expiracao}.
+
+No app FisioHelp, na tela de login, toque em "Esqueceu a senha?", informe seu e-mail e digite este código para criar uma nova senha.
+
+Se você não solicitou a redefinição de senha, ignore esta mensagem ou entre em contato pelo e-mail suporte@fisiohelp.com.br.
+
+Atenciosamente,
+Equipe FisioHelp`;
+
+  return montarShell({ assunto, conteudoHtml, conteudoTexto });
+}
+
 export default {
   montarEmailVerificacaoPaciente,
   montarEmailVerificacaoFisioterapeuta,
   montarEmailConvitePreCadastroSimples,
+  montarEmailRedefinicaoSenha,
 };

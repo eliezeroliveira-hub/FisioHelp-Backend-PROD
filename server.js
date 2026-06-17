@@ -30,6 +30,7 @@ import getPool from './config/dbConfig.js';
 import { startReembolsosGatewayWorker } from './workers/reembolsosGatewayWorker.js';
 import { startRepassesGatewayWorker } from './workers/repassesGatewayWorker.js';
 import { startNotificacoesWorker } from './workers/notificacoesWorker.js';
+import { startAvaliacoesPendentesWorker } from './workers/avaliacoesPendentesWorker.js';
 import { isContatoProviderReal } from './providers/contatoProvider.js';
 
 // 🔧 Inicialização
@@ -177,6 +178,7 @@ app.listen(ENV.PORT, () => {
   startReembolsosGatewayWorker();
   startRepassesGatewayWorker();
   startNotificacoesWorker();
+  startAvaliacoesPendentesWorker();
 });
 
 

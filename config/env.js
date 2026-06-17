@@ -67,16 +67,20 @@ if (!['stub', 'expo', 'fcm', 'apns'].includes(pushProviderMode)) {
 const expoPushAccessToken = optionalEnv('EXPO_PUSH_ACCESS_TOKEN');
 
 const emailProviderMode = String(process.env.EMAIL_PROVIDER_MODE || 'stub').trim().toLowerCase();
-if (!['stub', 'ses'].includes(emailProviderMode)) {
-  throw new Error('EMAIL_PROVIDER_MODE inválido. Use stub ou ses.');
+if (!['stub', 'ses', 'acs'].includes(emailProviderMode)) {
+  throw new Error('EMAIL_PROVIDER_MODE inválido. Use stub, ses ou acs.');
 }
 const contatoProviderMode = String(process.env.CONTATO_PROVIDER_MODE || 'stub').trim().toLowerCase();
-if (!['stub', 'ses'].includes(contatoProviderMode)) {
-  throw new Error('CONTATO_PROVIDER_MODE inválido. Use stub ou ses.');
+if (!['stub', 'ses', 'acs'].includes(contatoProviderMode)) {
+  throw new Error('CONTATO_PROVIDER_MODE inválido. Use stub, ses ou acs.');
 }
 const awsRegion = optionalEnv('AWS_REGION') || 'sa-east-1';
 const emailFrom = optionalEnv('EMAIL_FROM') || 'nao-responda@notificacoes.fisiohelp.com.br';
 const emailReplyTo = optionalEnv('EMAIL_REPLY_TO');
+const acsConnectionString = optionalEnv('ACS_CONNECTION_STRING');
+const acsSenderAddress = optionalEnv('ACS_SENDER_ADDRESS');
+const acsEventGridWebhookSecret = requiredInProduction('ACS_EVENTGRID_WEBHOOK_SECRET');
+const sesSnsTopicArn = optionalEnv('SES_SNS_TOPIC_ARN');
 
 const refreshTokenDays = parsePositiveIntEnv('REFRESH_TOKEN_DAYS', 30);
 
@@ -133,9 +137,19 @@ export const ENV = {
   AWS_REGION: awsRegion,
   EMAIL_FROM: emailFrom,
   EMAIL_REPLY_TO: emailReplyTo,
+  ACS_CONNECTION_STRING: acsConnectionString,
+  ACS_SENDER_ADDRESS: acsSenderAddress,
+  ACS_EVENTGRID_WEBHOOK_SECRET: acsEventGridWebhookSecret,
+  SES_SNS_TOPIC_ARN: sesSnsTopicArn,
   NOTIF_WORKER_ENABLED: process.env.NOTIF_WORKER_ENABLED,
   NOTIF_WORKER_INTERVAL_MS: process.env.NOTIF_WORKER_INTERVAL_MS,
   NOTIF_WORKER_STALE_MINUTES: process.env.NOTIF_WORKER_STALE_MINUTES,
   NOTIF_WORKER_BATCH_SIZE: process.env.NOTIF_WORKER_BATCH_SIZE,
+  AVALIACAO_WORKER_ENABLED: process.env.AVALIACAO_WORKER_ENABLED,
+  AVALIACAO_WORKER_EMAIL_ENABLED: process.env.AVALIACAO_WORKER_EMAIL_ENABLED,
+  AVALIACAO_WORKER_INTERVAL_MS: process.env.AVALIACAO_WORKER_INTERVAL_MS,
+  AVALIACAO_WORKER_DELAY_MINUTES: process.env.AVALIACAO_WORKER_DELAY_MINUTES,
+  AVALIACAO_WORKER_LOOKBACK_DAYS: process.env.AVALIACAO_WORKER_LOOKBACK_DAYS,
+  AVALIACAO_WORKER_BATCH_SIZE: process.env.AVALIACAO_WORKER_BATCH_SIZE,
 };
 

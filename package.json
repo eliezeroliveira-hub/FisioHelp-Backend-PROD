@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.1068.0",
+    "@azure/communication-email": "^1.1.0",
     "apple-signin-auth": "^2.0.0",
     "axios": "^1.7.3",
     "bcrypt": "^6.0.0",

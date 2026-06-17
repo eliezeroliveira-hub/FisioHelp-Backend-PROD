@@ -4,6 +4,7 @@ import { ENV } from '../config/env.js';
 import { log } from '../config/logger.js';
 import { authService } from '../services/authService.js';
 import { validarGoogleToken, validarAppleToken } from '../services/oauthService.js';
+import redefinicaoSenhaService from '../services/redefinicaoSenhaService.js';
 
 /* ------------------------------ helpers ------------------------------ */
 
@@ -242,6 +243,37 @@ const authController = {
       });
     } catch (erro) {
       const out = authErrorPayload(erro, 401);
+      return res.status(out.status).json(out.body);
+    }
+  },
+
+  async solicitarRedefinicaoSenha(req, res) {
+    try {
+      const data = await redefinicaoSenhaService.solicitarRedefinicaoSenha(req.body || {}, req);
+      return res.status(200).json(data);
+    } catch (erro) {
+      log('error', 'Erro ao solicitar redefinição de senha', { erro: erro.message });
+      const out = authErrorPayload(erro, 500);
+      return res.status(out.status).json(out.body);
+    }
+  },
+
+  async confirmarCodigoRedefinicaoSenha(req, res) {
+    try {
+      const data = await redefinicaoSenhaService.confirmarCodigoRedefinicaoSenha(req.body || {});
+      return res.status(200).json(data);
+    } catch (erro) {
+      const out = authErrorPayload(erro, 400);
+      return res.status(out.status).json(out.body);
+    }
+  },
+
+  async redefinirSenha(req, res) {
+    try {
+      const data = await redefinicaoSenhaService.redefinirSenha(req.body || {});
+      return res.status(200).json(data);
+    } catch (erro) {
+      const out = authErrorPayload(erro, 400);
       return res.status(out.status).json(out.body);
     }
   },

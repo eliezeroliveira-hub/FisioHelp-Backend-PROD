@@ -7,6 +7,7 @@ import { HttpError } from '../utils/httpError.js';
 import { isValidEmail, normalizeEmail } from '../utils/identityValidators.js';
 import { queryWithContext } from './_queryWithContext.js';
 import { montarEmailNotificacao } from './emailTemplates.js';
+import emailSupressaoService from './emailSupressaoService.js';
 
 const USUARIOS_VALIDOS = new Set(['Paciente', 'Fisioterapeuta']);
 const PLATAFORMAS_VALIDAS = new Set(['ios', 'android']);
@@ -454,6 +455,10 @@ async function resolverEmailUsuario(usuarioTipo, usuarioId) {
 
   if (!isBitAtivo(row?.EmailVerificado)) {
     return { email: null, erro: 'e-mail não verificado' };
+  }
+
+  if (await emailSupressaoService.emailEstaSuprimido(email)) {
+    return { email: null, erro: 'e-mail suprimido' };
   }
 
   return { email, erro: null };
