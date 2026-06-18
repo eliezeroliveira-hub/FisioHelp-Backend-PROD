@@ -30,21 +30,61 @@ export function isValidCPF(value) {
   return true;
 }
 
+const CNPJ_ZERO = '00000000000000';
+const CNPJ_BASE_LENGTH = 12;
+const CNPJ_FULL_REGEX = /^[A-Z\d]{12}\d{2}$/;
+const CNPJ_BASE_REGEX = /^[A-Z\d]{12}$/;
+const CNPJ_WEIGHTS = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+const CHAR_CODE_ZERO = '0'.charCodeAt(0);
+
+export function normalizeCNPJ(value) {
+  return String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/[.\-/\s]/g, '');
+}
+
+export function calcularDigitosCNPJ(base) {
+  const cnpjBase = normalizeCNPJ(base);
+  if (!CNPJ_BASE_REGEX.test(cnpjBase) || cnpjBase === CNPJ_ZERO.slice(0, CNPJ_BASE_LENGTH)) {
+    throw new Error('CNPJ base inválido.');
+  }
+
+  let somaDv1 = 0;
+  let somaDv2 = 0;
+  for (let i = 0; i < CNPJ_BASE_LENGTH; i += 1) {
+    const valor = cnpjBase.charCodeAt(i) - CHAR_CODE_ZERO;
+    somaDv1 += valor * CNPJ_WEIGHTS[i + 1];
+    somaDv2 += valor * CNPJ_WEIGHTS[i];
+  }
+
+  const dv1 = somaDv1 % 11 < 2 ? 0 : 11 - (somaDv1 % 11);
+  somaDv2 += dv1 * CNPJ_WEIGHTS[CNPJ_BASE_LENGTH];
+  const dv2 = somaDv2 % 11 < 2 ? 0 : 11 - (somaDv2 % 11);
+  return `${dv1}${dv2}`;
+}
+
 export function isValidCNPJ(value) {
-  const digits = String(value || '').replace(/\D/g, '');
-  if (digits.length !== 14) return false;
-  if (/^(\d)\1{13}$/.test(digits)) return false;
+  const cnpj = normalizeCNPJ(value);
+  if (!CNPJ_FULL_REGEX.test(cnpj)) return false;
+  if (cnpj === CNPJ_ZERO) return false;
 
-  const nums = digits.split('').map(Number);
-  const calcDigit = (weights) => {
-    const sum = weights.reduce((acc, weight, index) => acc + nums[index] * weight, 0);
-    const rest = sum % 11;
-    return rest < 2 ? 0 : 11 - rest;
-  };
+  const dvInformado = cnpj.slice(CNPJ_BASE_LENGTH);
+  const dvCalculado = calcularDigitosCNPJ(cnpj.slice(0, CNPJ_BASE_LENGTH));
+  return dvInformado === dvCalculado;
+}
 
-  const dv1 = calcDigit([5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
-  if (dv1 !== nums[12]) return false;
+export function isCNPJAlfanumerico(value) {
+  const cnpj = normalizeCNPJ(value);
+  return /^[A-Z\d]{14}$/.test(cnpj) && /[A-Z]/.test(cnpj);
+}
 
-  const dv2 = calcDigit([6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
-  return dv2 === nums[13];
+export function formatCNPJ(value) {
+  const cnpj = normalizeCNPJ(value);
+  if (/^[A-Z\d]{14}$/.test(cnpj)) {
+    return `${cnpj.slice(0, 2)}.${cnpj.slice(2, 5)}.${cnpj.slice(5, 8)}/${cnpj.slice(8, 12)}-${cnpj.slice(12)}`;
+  }
+
+  const raw = String(value ?? '').trim();
+  return raw || null;
 }

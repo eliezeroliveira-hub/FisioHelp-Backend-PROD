@@ -1,6 +1,6 @@
 import sql from 'mssql';
 import { queryWithContext } from '../services/_queryWithContext.js';
-import { isValidCNPJ, isValidCPF, isValidEmail, normalizeEmail } from '../utils/identityValidators.js';
+import { isValidCNPJ, isValidCPF, isValidEmail, normalizeCNPJ, normalizeEmail } from '../utils/identityValidators.js';
 
 function onlyDigits(v) {
   return String(v || '').replace(/\D/g, '');
@@ -116,7 +116,7 @@ const cadastroController = {
       }
 
       if (c === 'cnpj') {
-        const cnpj = onlyDigits(valor);
+        const cnpj = normalizeCNPJ(valor);
         if (!isValidCNPJ(cnpj)) {
           return res.json({ disponivel: false, mensagem: 'CNPJ inválido.' });
         }

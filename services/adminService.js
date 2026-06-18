@@ -5,6 +5,7 @@ import path from 'path';
 import { queryWithContext } from './_queryWithContext.js';
 import notificacoesDispatch from './notificacoesDispatch.js';
 import { HttpError } from '../utils/httpError.js';
+import { normalizeCNPJ } from '../utils/identityValidators.js';
 
 const YOUTUBE_RE = /^https?:\/\/(www\.)?(youtube\.com\/(watch\?v=|embed\/|shorts\/)|youtu\.be\/).+/i;
 const STATUS_DOCUMENTO_VALIDOS = new Set(['Aprovado', 'Reprovado', 'Pendente']);
@@ -349,11 +350,13 @@ const adminService = {
   async listarFisioterapeutas(usuario, { busca, status, limit = 20, offset = 0 } = {}) {
     const limitNum  = Math.min(Math.max(Number(limit)  || 20, 1), 100);
     const offsetNum = Math.max(Number(offset) || 0, 0);
+    const buscaCnpj = busca ? normalizeCNPJ(busca) : '';
 
     const r = await queryWithContext(
       usuario,
       (req) => req
         .input('Busca',   sql.NVarChar(200), busca  ? `%${busca}%` : null)
+        .input('BuscaCnpj', sql.NVarChar(20), buscaCnpj ? `%${buscaCnpj}%` : null)
         .input('Status',  sql.NVarChar(20),  status || null)
         .input('Limit',   sql.Int,           limitNum)
         .input('Offset',  sql.Int,           offsetNum),
@@ -377,6 +380,7 @@ const adminService = {
             f.Email     LIKE @Busca OR
             f.CREFITO   LIKE @Busca OR
             f.CNPJ      LIKE @Busca OR
+            (@BuscaCnpj IS NOT NULL AND f.CNPJ LIKE @BuscaCnpj) OR
             f.Telefone  LIKE @Busca
           ))
           AND (@Status IS NULL

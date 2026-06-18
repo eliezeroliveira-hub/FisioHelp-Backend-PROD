@@ -12,10 +12,19 @@ import { solicitarVerificacaoContatoInterna } from './verificacaoContatoService.
 import contatoProvider from '../providers/contatoProvider.js';
 import { HttpError } from '../utils/httpError.js';
 import { getContatoSecret } from '../utils/contactSecret.js';
-import { isValidCNPJ, isValidCPF, isValidEmail, normalizeEmail as normalizeEmailAddress } from '../utils/identityValidators.js';
+import {
+  isCNPJAlfanumerico,
+  isValidCNPJ,
+  isValidCPF,
+  isValidEmail,
+  normalizeCNPJ,
+  normalizeEmail as normalizeEmailAddress,
+} from '../utils/identityValidators.js';
 import { validatePasswordStrength } from '../utils/passwordPolicy.js';
 
 const APP_TIME_ZONE = 'America/Sao_Paulo';
+const CNPJ_ALFANUMERICO_REPASSE_MSG =
+  'CNPJ alfanumérico ainda não é suportado pelo gateway para repasse via TED ou chave Pix do tipo CNPJ. Para receber repasses, cadastre uma chave Pix do tipo e-mail, telefone ou chave aleatória.';
 
 // --- Utilitários de normalização para verificação de contato ---
 function normalizarEmail(email) {
@@ -115,8 +124,9 @@ function normalizarChavePix(tipo, value) {
   if (!raw) return null;
 
   if (tipo === 'CNPJ') {
-    const cnpj = raw.replace(/\D/g, '');
+    const cnpj = normalizeCNPJ(raw);
     if (!isValidCNPJ(cnpj)) throw new HttpError(400, 'Chave Pix CNPJ inválida.');
+    if (isCNPJAlfanumerico(cnpj)) throw new HttpError(400, CNPJ_ALFANUMERICO_REPASSE_MSG);
     return cnpj;
   }
 
@@ -176,6 +186,25 @@ function normalizarBancoParaRepasse(value) {
     throw new HttpError(400, 'Banco inválido. Selecione um banco da lista.');
   }
   return banco;
+}
+
+async function validarCnpjRepasseAutomatico(ctx, fisioterapeutaId) {
+  const cnpjAtualResult = await queryWithContext(ctx, (req) => {
+    req.input('Id', sql.Int, fisioterapeutaId);
+  }, `
+    SELECT TOP (1) CNPJ
+    FROM dbo.Fisioterapeutas
+    WHERE Id = @Id;
+  `);
+
+  const cnpjAtual = normalizeCNPJ(cnpjAtualResult.recordset?.[0]?.CNPJ ?? '');
+  if (!isValidCNPJ(cnpjAtual)) {
+    throw new HttpError(400, 'CNPJ do fisioterapeuta inválido. Corrija o cadastro antes de salvar dados bancários.');
+  }
+  if (isCNPJAlfanumerico(cnpjAtual)) {
+    throw new HttpError(400, CNPJ_ALFANUMERICO_REPASSE_MSG);
+  }
+  return cnpjAtual;
 }
 
 function gerarSalt16() {
@@ -1340,7 +1369,7 @@ const fisioterapeutasService = {
 
     const crefito = normalizarCrefito(CREFITO);
     const uf = Estado.toUpperCase().trim();
-    const cnpj = String(CNPJ).replace(/\D/g, '');
+    const cnpj = normalizeCNPJ(CNPJ);
 
     if (!/^[A-Z]{2}$/.test(uf)) throw new HttpError(400, 'Estado inválido. Use sigla UF, ex.: SP.');
     if (!isValidCNPJ(cnpj)) throw new HttpError(400, 'CNPJ inválido.');
@@ -1698,17 +1727,7 @@ const fisioterapeutasService = {
         dados.Conta = normalizarContaBancaria(dados.Conta);
         dados.TipoContaBancaria = normalizarTipoContaBancaria(dados.TipoContaBancaria);
 
-        const cnpjAtualResult = await queryWithContext(ctx, (req) => {
-          req.input('Id', sql.Int, id);
-        }, `
-          SELECT TOP (1) CNPJ
-          FROM dbo.Fisioterapeutas
-          WHERE Id = @Id;
-        `);
-        const cnpjAtual = cnpjAtualResult.recordset?.[0]?.CNPJ ?? null;
-        if (!isValidCNPJ(String(cnpjAtual ?? '').replace(/\D/g, ''))) {
-          throw new HttpError(400, 'CNPJ do fisioterapeuta inválido. Corrija o cadastro antes de salvar dados bancários.');
-        }
+        await validarCnpjRepasseAutomatico(ctx, id);
       }
     }
 

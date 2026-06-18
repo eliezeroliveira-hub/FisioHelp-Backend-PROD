@@ -1,7 +1,9 @@
 import crypto from 'crypto';
+import twilio from 'twilio';
 import { ENV } from '../config/env.js';
 import { log } from '../config/logger.js';
 import emailSupressaoService from '../services/emailSupressaoService.js';
+import { mascararWhatsApp } from '../providers/whatsappProvider.js';
 
 const SNS_CERT_CACHE = new Map();
 
@@ -47,6 +49,35 @@ function motivoAcs(status) {
   if (value === 'bounced') return 'Bounce';
   if (value === 'suppressed') return 'Suppressed';
   return null;
+}
+
+function validarAssinaturaTwilio(req) {
+  const signature = String(req.headers['x-twilio-signature'] || '');
+  const callbackUrl = String(ENV.TWILIO_WHATSAPP_STATUS_CALLBACK_URL || '').trim();
+
+  if (!ENV.TWILIO_AUTH_TOKEN) {
+    const err = new Error('TWILIO_AUTH_TOKEN não configurado.');
+    err.statusCode = 500;
+    throw err;
+  }
+
+  if (!callbackUrl) {
+    const err = new Error('TWILIO_WHATSAPP_STATUS_CALLBACK_URL não configurado.');
+    err.statusCode = 500;
+    throw err;
+  }
+
+  if (!signature) {
+    return false;
+  }
+
+  return twilio.validateRequest(ENV.TWILIO_AUTH_TOKEN, signature, callbackUrl, req.body || {});
+}
+
+function statusTwilioLogLevel(status) {
+  const value = String(status || '').trim().toLowerCase();
+  if (['failed', 'undelivered'].includes(value)) return 'warn';
+  return 'info';
 }
 
 function isTrustedSnsUrl(rawUrl) {
@@ -293,6 +324,44 @@ const notificacoesWebhookController = {
         erro: err?.message,
       });
       return res.status(status >= 500 ? 200 : status).json({ received: status >= 500, erro: status >= 500 ? undefined : err?.message });
+    }
+  },
+
+  async twilioWhatsappStatus(req, res) {
+    try {
+      const assinaturaValida = validarAssinaturaTwilio(req);
+      if (!assinaturaValida) {
+        return res.status(403).json({ erro: 'Assinatura Twilio inválida.' });
+      }
+
+      const body = req.body || {};
+      const messageSid = String(body.MessageSid || body.SmsSid || '').trim() || null;
+      const messageStatus = String(body.MessageStatus || body.SmsStatus || '').trim() || null;
+      const errorCode = String(body.ErrorCode || '').trim() || null;
+      const errorMessage = String(body.ErrorMessage || '').trim() || null;
+      const to = String(body.To || '').trim();
+      const from = String(body.From || '').trim();
+
+      log(statusTwilioLogLevel(messageStatus), 'Status callback Twilio WhatsApp recebido', {
+        messageSid,
+        messageStatus,
+        to: mascararWhatsApp(to),
+        from: mascararWhatsApp(from),
+        errorCode,
+        errorMessage,
+      });
+
+      return res.status(200).json({ received: true });
+    } catch (err) {
+      const status = err?.statusCode || 500;
+      log(status >= 500 ? 'error' : 'warn', 'Erro ao processar status callback Twilio WhatsApp', {
+        erro: err?.message,
+      });
+
+      return res.status(status).json({
+        received: false,
+        erro: status >= 500 ? 'Erro interno do servidor.' : err?.message,
+      });
     }
   },
 };

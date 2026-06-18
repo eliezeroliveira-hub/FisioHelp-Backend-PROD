@@ -31,6 +31,7 @@ import { startReembolsosGatewayWorker } from './workers/reembolsosGatewayWorker.
 import { startRepassesGatewayWorker } from './workers/repassesGatewayWorker.js';
 import { startNotificacoesWorker } from './workers/notificacoesWorker.js';
 import { startAvaliacoesPendentesWorker } from './workers/avaliacoesPendentesWorker.js';
+import { startConsultasLembretesWorker } from './workers/consultasLembretesWorker.js';
 import { isContatoProviderReal } from './providers/contatoProvider.js';
 
 // 🔧 Inicialização
@@ -179,6 +180,7 @@ app.listen(ENV.PORT, () => {
   startRepassesGatewayWorker();
   startNotificacoesWorker();
   startAvaliacoesPendentesWorker();
+  startConsultasLembretesWorker();
 });
 
 

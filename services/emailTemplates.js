@@ -1,3 +1,5 @@
+import { formatCNPJ } from '../utils/identityValidators.js';
+
 const FOOTER = 'Mensagem automática — esta caixa não é monitorada. Fale com suporte@fisiohelp.com.br.';
 const FALLBACK_SUBJECT = 'Mensagem da FisioHelp';
 const TERMOS_URL = 'https://fisiohelp.com.br/termos-de-uso';
@@ -39,10 +41,7 @@ function formatarMoeda(valor) {
 }
 
 function formatarCnpj(value) {
-  const raw = texto(value);
-  const digits = raw.replace(/\D/g, '');
-  if (digits.length !== 14) return raw || null;
-  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
+  return formatCNPJ(value);
 }
 
 function formatarDataHora(value) {
@@ -236,7 +235,7 @@ function montarEmailPagamentoConsulta(dados = {}) {
   const conteudoHtml = `
     <h1 style="margin:0 0 18px 0;color:#3D2B22;font-size:22px;line-height:1.3;font-weight:700;">${escapeHtml(assunto)}</h1>
     <p style="margin:0 0 16px 0;color:#3D2B22;font-size:16px;line-height:1.6;">Olá, ${escapeHtml(primeiroNome(pacienteNome, 'Paciente'))},</p>
-    <p style="margin:0 0 22px 0;color:#3D2B22;font-size:16px;line-height:1.6;">Confirmamos que recebemos a sua aceitação da oferta e que o seu agendamento pela plataforma FisioHelp foi registrado com sucesso.</p>
+    <p style="margin:0 0 22px 0;color:#3D2B22;font-size:16px;line-height:1.6;">Confirmamos que recebemos a sua aceitação da oferta e que o seu agendamento pela plataforma FisioHelp foi registrado com sucesso. O fisioterapeuta será notificado para confirmar o agendamento no aplicativo. Após a confirmação, você receberá um novo e-mail.</p>
 
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 24px 0;border-top:1px solid rgba(61,43,34,0.10);border-bottom:1px solid rgba(61,43,34,0.10);">
       ${resumoRows}
@@ -270,7 +269,7 @@ function montarEmailPagamentoConsulta(dados = {}) {
 
 Olá, ${primeiroNome(pacienteNome, 'Paciente')},
 
-Confirmamos que recebemos a sua aceitação da oferta e que o seu agendamento pela plataforma FisioHelp foi registrado com sucesso.
+Confirmamos que recebemos a sua aceitação da oferta e que o seu agendamento pela plataforma FisioHelp foi registrado com sucesso. O fisioterapeuta será notificado para confirmar o agendamento no aplicativo. Após a confirmação, você receberá um novo e-mail.
 
 Código da Contratação: ${codigo}
 Número do Agendamento: ${numeroAgendamento}

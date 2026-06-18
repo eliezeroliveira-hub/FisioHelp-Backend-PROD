@@ -2,6 +2,26 @@
 // Bloqueia envio de links / contatos / dados pessoais no chat.
 // Observação: se vier apenas documentoPacienteId (sem conteudo),
 // o chatService pode gerar o conteúdo automaticamente — então deixamos passar.
+import { isValidCNPJ } from "../utils/identityValidators.js";
+
+function firstValidCnpj(text) {
+  const conteudo = String(text || "");
+  const patterns = [
+    /\b[A-Z0-9]{2}[.\s]?[A-Z0-9]{3}[.\s]?[A-Z0-9]{3}[/\s]?[A-Z0-9]{4}[\s-]?\d{2}\b/gi,
+    /\b[A-Z0-9]{12}\d{2}\b/gi,
+  ];
+
+  for (const pattern of patterns) {
+    const matches = conteudo.matchAll(pattern);
+    for (const match of matches) {
+      const candidate = match?.[0] || "";
+      if (isValidCNPJ(candidate)) return candidate;
+    }
+  }
+
+  return null;
+}
+
 export default function chatMessageGuard(req, res, next) {
   const body = req.body || {};
 
@@ -54,8 +74,7 @@ export default function chatMessageGuard(req, res, next) {
   // ---------------------------
   const hasCPF =
     /\b\d{3}[.\s-]?\d{3}[.\s-]?\d{3}[.\s-]?\d{2}\b/.test(conteudo);
-  const hasCNPJ =
-    /\b\d{2}[.\s]?\d{3}[.\s]?\d{3}[/\s]?\d{4}[\s-]?\d{2}\b/.test(conteudo);
+  const hasCNPJ = Boolean(firstValidCnpj(conteudo));
 
   // ---------------------------
   // 5) PIX / chave

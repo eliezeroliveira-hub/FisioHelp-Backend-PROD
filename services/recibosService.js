@@ -10,6 +10,7 @@ import PDFDocument from 'pdfkit';
 
 import { sql } from '../config/dbConfig.js';
 import { queryWithContext } from './_queryWithContext.js';
+import { formatCNPJ } from '../utils/identityValidators.js';
 
 function toInt(v) {
   const n = Number(v);
@@ -51,10 +52,7 @@ function formatMoneyBRL(v) {
 }
 
 function formatCnpj(v) {
-  const raw = String(v ?? '').trim();
-  const digits = raw.replace(/\D/g, '');
-  if (digits.length !== 14) return raw;
-  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
+  return formatCNPJ(v) || String(v ?? '').trim();
 }
 
 const UPLOADS_DIR = path.join(process.cwd(), 'uploads');

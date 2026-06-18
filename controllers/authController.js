@@ -5,6 +5,7 @@ import { log } from '../config/logger.js';
 import { authService } from '../services/authService.js';
 import { validarGoogleToken, validarAppleToken } from '../services/oauthService.js';
 import redefinicaoSenhaService from '../services/redefinicaoSenhaService.js';
+import { isValidCNPJ, normalizeCNPJ } from '../utils/identityValidators.js';
 
 /* ------------------------------ helpers ------------------------------ */
 
@@ -125,7 +126,7 @@ const authController = {
    * Aceita:
    *  - email
    *  - cpf (11 dígitos)
-   *  - cnpj (14 dígitos)
+   *  - cnpj (14 caracteres, numérico ou alfanumérico)
    *  - login (fallback genérico)
    */
   async login(req, res) {
@@ -139,14 +140,15 @@ const authController = {
     try {
       const identificador = String(identificadorRaw).trim();
       const digits = normalizeDigits(identificador);
+      const cnpjNorm = normalizeCNPJ(identificador);
 
       const isCPF = digits.length === 11;
-      const isCNPJ = digits.length === 14;
+      const isCNPJ = isValidCNPJ(cnpjNorm);
 
       const payload = { senha: String(senha) };
 
       if (isCPF) payload.cpf = digits;
-      else if (isCNPJ) payload.cnpj = digits;
+      else if (isCNPJ) payload.cnpj = cnpjNorm;
       else payload.email = identificador;
 
       const data = await authService.login(payload, req);

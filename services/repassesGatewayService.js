@@ -4,10 +4,13 @@ import { log } from '../config/logger.js';
 import { queryWithContext } from './_queryWithContext.js';
 import { asaasClient } from './asaasClient.js';
 import notificacoesDispatch from './notificacoesDispatch.js';
+import { isCNPJAlfanumerico, isValidCNPJ, normalizeCNPJ } from '../utils/identityValidators.js';
 
 const STATUS_LOTE_ATIVO = ['Processando', 'EnviadoGateway', 'AguardandoConfirmacao'];
 const STATUS_TRANSFER_DONE = new Set(['DONE']);
 const STATUS_TRANSFER_FALHA = new Set(['FAILED', 'CANCELLED', 'CANCELED', 'REFUSED']);
+const CNPJ_ALFANUMERICO_REPASSE_MSG =
+  'CNPJ alfanumérico ainda não é suportado pelo gateway para repasse via TED ou chave Pix do tipo CNPJ. Para receber repasses, cadastre uma chave Pix do tipo e-mail, telefone ou chave aleatória.';
 
 function systemUser() {
   return { tipo: 'Admin', id: Number(ENV.SYSTEM_ADMIN_ID ?? 1) };
@@ -99,25 +102,20 @@ function onlyDigits(value) {
   return String(value ?? '').replace(/\D/g, '');
 }
 
-function isValidCNPJ(value) {
-  const cnpj = onlyDigits(value);
-  if (!/^\d{14}$/.test(cnpj) || /^(\d)\1{13}$/.test(cnpj)) return false;
-
-  const calcDigit = (base, weights) => {
-    const sum = weights.reduce((acc, weight, index) => acc + Number(base[index]) * weight, 0);
-    const remainder = sum % 11;
-    return remainder < 2 ? 0 : 11 - remainder;
-  };
-
-  const firstDigit = calcDigit(cnpj, [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
-  const secondDigit = calcDigit(cnpj, [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
-  return firstDigit === Number(cnpj[12]) && secondDigit === Number(cnpj[13]);
+function getValidCnpj(lote) {
+  const cnpj = normalizeCNPJ(lote?.CNPJ);
+  if (!isValidCNPJ(cnpj)) return null;
+  if (isCNPJAlfanumerico(cnpj)) {
+    throw new Error(CNPJ_ALFANUMERICO_REPASSE_MSG);
+  }
+  return cnpj;
 }
 
-function getValidCnpj(lote) {
-  const cnpj = onlyDigits(lote?.CNPJ);
-  if (isValidCNPJ(cnpj)) return cnpj;
-  return null;
+function assertCnpjSuportadoPeloGateway(value) {
+  const cnpj = normalizeCNPJ(value);
+  if (isValidCNPJ(cnpj) && isCNPJAlfanumerico(cnpj)) {
+    throw new Error(CNPJ_ALFANUMERICO_REPASSE_MSG);
+  }
 }
 
 function hasPixDestination(lote) {
@@ -193,6 +191,11 @@ function buildBankAccountTransferPayload(lote) {
 function buildAsaasTransferPayload(lote) {
   if (!hasPixDestination(lote)) {
     return buildBankAccountTransferPayload(lote);
+  }
+
+  const tipoChavePix = String(lote?.TipoChavePix ?? '').trim().toUpperCase();
+  if (tipoChavePix === 'CNPJ') {
+    assertCnpjSuportadoPeloGateway(lote?.ChavePix ?? lote?.CNPJ);
   }
 
   return {

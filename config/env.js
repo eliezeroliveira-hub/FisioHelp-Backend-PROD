@@ -74,6 +74,10 @@ const contatoProviderMode = String(process.env.CONTATO_PROVIDER_MODE || 'stub').
 if (!['stub', 'ses', 'acs'].includes(contatoProviderMode)) {
   throw new Error('CONTATO_PROVIDER_MODE inválido. Use stub, ses ou acs.');
 }
+const whatsappProviderMode = String(process.env.WHATSAPP_PROVIDER_MODE || 'stub').trim().toLowerCase();
+if (!['stub', 'twilio'].includes(whatsappProviderMode)) {
+  throw new Error('WHATSAPP_PROVIDER_MODE inválido. Use stub ou twilio.');
+}
 const awsRegion = optionalEnv('AWS_REGION') || 'sa-east-1';
 const emailFrom = optionalEnv('EMAIL_FROM') || 'nao-responda@notificacoes.fisiohelp.com.br';
 const emailReplyTo = optionalEnv('EMAIL_REPLY_TO');
@@ -81,6 +85,10 @@ const acsConnectionString = optionalEnv('ACS_CONNECTION_STRING');
 const acsSenderAddress = optionalEnv('ACS_SENDER_ADDRESS');
 const acsEventGridWebhookSecret = requiredInProduction('ACS_EVENTGRID_WEBHOOK_SECRET');
 const sesSnsTopicArn = optionalEnv('SES_SNS_TOPIC_ARN');
+const twilioAccountSid = optionalEnv('TWILIO_ACCOUNT_SID');
+const twilioAuthToken = optionalEnv('TWILIO_AUTH_TOKEN');
+const twilioWhatsappFrom = optionalEnv('TWILIO_WHATSAPP_FROM') || 'whatsapp:+14155238886';
+const twilioWhatsappStatusCallbackUrl = optionalEnv('TWILIO_WHATSAPP_STATUS_CALLBACK_URL');
 
 const refreshTokenDays = parsePositiveIntEnv('REFRESH_TOKEN_DAYS', 30);
 
@@ -134,6 +142,7 @@ export const ENV = {
   EXPO_PUSH_ACCESS_TOKEN: expoPushAccessToken,
   EMAIL_PROVIDER_MODE: emailProviderMode,
   CONTATO_PROVIDER_MODE: contatoProviderMode,
+  WHATSAPP_PROVIDER_MODE: whatsappProviderMode,
   AWS_REGION: awsRegion,
   EMAIL_FROM: emailFrom,
   EMAIL_REPLY_TO: emailReplyTo,
@@ -141,6 +150,10 @@ export const ENV = {
   ACS_SENDER_ADDRESS: acsSenderAddress,
   ACS_EVENTGRID_WEBHOOK_SECRET: acsEventGridWebhookSecret,
   SES_SNS_TOPIC_ARN: sesSnsTopicArn,
+  TWILIO_ACCOUNT_SID: twilioAccountSid,
+  TWILIO_AUTH_TOKEN: twilioAuthToken,
+  TWILIO_WHATSAPP_FROM: twilioWhatsappFrom,
+  TWILIO_WHATSAPP_STATUS_CALLBACK_URL: twilioWhatsappStatusCallbackUrl,
   NOTIF_WORKER_ENABLED: process.env.NOTIF_WORKER_ENABLED,
   NOTIF_WORKER_INTERVAL_MS: process.env.NOTIF_WORKER_INTERVAL_MS,
   NOTIF_WORKER_STALE_MINUTES: process.env.NOTIF_WORKER_STALE_MINUTES,
@@ -151,5 +164,10 @@ export const ENV = {
   AVALIACAO_WORKER_DELAY_MINUTES: process.env.AVALIACAO_WORKER_DELAY_MINUTES,
   AVALIACAO_WORKER_LOOKBACK_DAYS: process.env.AVALIACAO_WORKER_LOOKBACK_DAYS,
   AVALIACAO_WORKER_BATCH_SIZE: process.env.AVALIACAO_WORKER_BATCH_SIZE,
+  CONSULTA_LEMBRETE_WORKER_ENABLED: process.env.CONSULTA_LEMBRETE_WORKER_ENABLED,
+  CONSULTA_LEMBRETE_EMAIL_ENABLED: process.env.CONSULTA_LEMBRETE_EMAIL_ENABLED,
+  CONSULTA_LEMBRETE_WORKER_INTERVAL_MS: process.env.CONSULTA_LEMBRETE_WORKER_INTERVAL_MS,
+  CONSULTA_LEMBRETE_HORAS_ANTES: process.env.CONSULTA_LEMBRETE_HORAS_ANTES,
+  CONSULTA_LEMBRETE_BATCH_SIZE: process.env.CONSULTA_LEMBRETE_BATCH_SIZE,
 };
 

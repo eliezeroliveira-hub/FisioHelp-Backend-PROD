@@ -62,6 +62,32 @@ function normalizarExpiracaoMinutos(value) {
   return Math.min(Math.trunc(n), 10080);
 }
 
+function formatarExpiracao(minutos) {
+  const n = Number(minutos);
+  if (!Number.isFinite(n) || n <= 0) return '10 minutos';
+  if (n % 1440 === 0) {
+    const dias = n / 1440;
+    return dias === 1 ? '24 horas' : `${dias * 24} horas`;
+  }
+  if (n % 60 === 0) {
+    const horas = n / 60;
+    return horas === 1 ? '1 hora' : `${horas} horas`;
+  }
+  return n === 1 ? '1 minuto' : `${n} minutos`;
+}
+
+function montarTextoWhatsAppVerificacao({ codigo, expiraEmMinutos }) {
+  return [
+    `Seu codigo de verificacao FisioHelp e: ${codigo}`,
+    '',
+    'No app FisioHelp, acesse Minha Conta > Verificacao de contato, toque em "Verificar agora" no telefone e digite este codigo.',
+    '',
+    `Este codigo expira em ${formatarExpiracao(expiraEmMinutos)}.`,
+    '',
+    'Nao compartilhe este codigo.',
+  ].join('\n');
+}
+
 async function buscarUsuarioContato({ usuarioTipo, usuarioId }) {
   const table = usuarioTipo === 'Paciente' ? 'dbo.Pacientes' : 'dbo.Fisioterapeutas';
   const result = await queryWithContext(
@@ -266,13 +292,17 @@ export async function solicitarVerificacaoContatoInterna({
 
   let envio = null;
   try {
+    const textoEnvio = canalNorm === 'Telefone'
+      ? montarTextoWhatsAppVerificacao({ codigo, expiraEmMinutos: minutos })
+      : (conteudo.corpoTexto || conteudo.texto || texto);
+
     envio = await contatoProvider.enviarCodigo({
       canal: canalNorm,
       destino: destinoNormalizado,
       codigo,
-      assunto: conteudo.assunto || assunto,
-      html: conteudo.corpoHtml || conteudo.html || html,
-      texto: conteudo.corpoTexto || conteudo.texto || texto,
+      assunto: canalNorm === 'Telefone' ? null : (conteudo.assunto || assunto),
+      html: canalNorm === 'Telefone' ? null : (conteudo.corpoHtml || conteudo.html || html),
+      texto: textoEnvio,
     });
   } catch (err) {
     await cancelarCodigoPendenteGerado();

@@ -11,6 +11,8 @@ const pagamentosWebhookWindowMs = parsePositiveInt(process.env.PAGAMENTOS_WEBHOO
 const pagamentosWebhookMax = parsePositiveInt(process.env.PAGAMENTOS_WEBHOOK_RATE_LIMIT_MAX, 300);
 const emailWebhookWindowMs = parsePositiveInt(process.env.EMAIL_WEBHOOK_RATE_LIMIT_WINDOW_MS, 60 * 1000);
 const emailWebhookMax = parsePositiveInt(process.env.EMAIL_WEBHOOK_RATE_LIMIT_MAX, 300);
+const twilioWhatsappWebhookWindowMs = parsePositiveInt(process.env.TWILIO_WHATSAPP_WEBHOOK_RATE_LIMIT_WINDOW_MS, 60 * 1000);
+const twilioWhatsappWebhookMax = parsePositiveInt(process.env.TWILIO_WHATSAPP_WEBHOOK_RATE_LIMIT_MAX, 300);
 
 export const apiLimiter = rateLimit({
   windowMs,
@@ -42,6 +44,14 @@ export const emailWebhookLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { erro: 'Muitos eventos de e-mail recebidos. Tente novamente em instantes.' }
+});
+
+export const twilioWhatsappWebhookLimiter = rateLimit({
+  windowMs: twilioWhatsappWebhookWindowMs,
+  max: twilioWhatsappWebhookMax,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { erro: 'Muitos eventos de WhatsApp recebidos. Tente novamente em instantes.' }
 });
 
 export default apiLimiter;

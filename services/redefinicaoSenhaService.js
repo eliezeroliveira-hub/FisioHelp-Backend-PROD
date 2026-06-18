@@ -10,7 +10,7 @@ import { getContatoSecret } from '../utils/contactSecret.js';
 import { isValidEmail, normalizeEmail } from '../utils/identityValidators.js';
 import { validatePasswordStrength } from '../utils/passwordPolicy.js';
 
-const GENERIC_MESSAGE = 'Se o e-mail estiver cadastrado e apto para redefinição, enviaremos um código.';
+const GENERIC_MESSAGE = 'Se o contato estiver cadastrado, ativo e verificado, enviaremos um código.';
 const INVALID_CODE_MESSAGE = 'Código inválido ou expirado.';
 const RESET_COOLDOWN_SECONDS = 60;
 const RESET_EXPIRATION_MINUTES = 10;
@@ -22,6 +22,74 @@ function normalizeRequestEmail(value) {
     throw new HttpError(400, 'E-mail inválido.');
   }
   return email;
+}
+
+function onlyDigits(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function normalizarTelefoneReset(value) {
+  const digits = onlyDigits(value);
+  if (!digits) {
+    throw new HttpError(400, 'Telefone inválido.');
+  }
+
+  if ((digits.length === 12 || digits.length === 13) && digits.startsWith('55')) {
+    return {
+      e164: `+${digits}`,
+      digits,
+      localDigits: digits.slice(2),
+    };
+  }
+
+  if (digits.length === 10 || digits.length === 11) {
+    return {
+      e164: `+55${digits}`,
+      digits: `55${digits}`,
+      localDigits: digits,
+    };
+  }
+
+  throw new HttpError(400, 'Telefone inválido.');
+}
+
+function normalizarCanalRedefinicao(value, fallback = 'Email') {
+  const raw = String(value || fallback).trim().toLowerCase();
+  if (raw === 'email' || raw === 'e-mail') return 'Email';
+  if (raw === 'telefone' || raw === 'tel' || raw === 'whatsapp' || raw === 'whats') return 'Telefone';
+  throw new HttpError(400, 'Canal inválido.');
+}
+
+function normalizarPedidoRedefinicao(payload = {}) {
+  const dados = payload || {};
+  const canal = normalizarCanalRedefinicao(
+    dados.canal,
+    dados.telefone ? 'Telefone' : 'Email'
+  );
+
+  if (canal === 'Telefone') {
+    const telefone = normalizarTelefoneReset(dados.destino ?? dados.telefone);
+    return {
+      canal,
+      destino: telefone.e164,
+      telefone,
+    };
+  }
+
+  const email = normalizeRequestEmail(dados.destino ?? dados.email);
+  return {
+    canal,
+    destino: email,
+    email,
+  };
+}
+
+function mensagemResetWhatsApp(codigo) {
+  return [
+    `Seu codigo para redefinir a senha da FisioHelp e: ${codigo}`,
+    '',
+    `Nao compartilhe este codigo. Ele expira em ${RESET_EXPIRATION_MINUTES} minutos.`,
+  ].join('\n');
 }
 
 function clientIp(reqLike) {
@@ -72,7 +140,9 @@ async function buscarUsuarioPorEmail(email) {
         Id,
         Nome,
         Email,
+        Telefone,
         EmailVerificado,
+        TelefoneVerificado,
         Ativo,
         IsBloqueado,
         N'Paciente' AS UsuarioTipo
@@ -85,7 +155,9 @@ async function buscarUsuarioPorEmail(email) {
         Id,
         Nome,
         Email,
+        Telefone,
         EmailVerificado,
+        TelefoneVerificado,
         Ativo,
         IsBloqueado,
         N'Fisioterapeuta' AS UsuarioTipo
@@ -106,11 +178,93 @@ async function buscarUsuarioPorEmail(email) {
   return { usuario: rows[0] || null, motivo: rows.length ? null : 'not_found' };
 }
 
+async function buscarUsuarioPorTelefone({ digits, localDigits }) {
+  const result = await queryWithContext(
+    null,
+    (req) => req
+      .input('TelefoneDigits', sql.NVarChar(30), digits)
+      .input('TelefoneLocalDigits', sql.NVarChar(30), localDigits),
+    `
+      SELECT TOP 1
+        Id,
+        Nome,
+        Email,
+        Telefone,
+        EmailVerificado,
+        TelefoneVerificado,
+        Ativo,
+        IsBloqueado,
+        N'Paciente' AS UsuarioTipo
+      FROM dbo.Pacientes
+      WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(Telefone, N''), N'+', N''), N' ', N''), N'-', N''), N'(', N''), N')', N'')
+            IN (@TelefoneDigits, @TelefoneLocalDigits)
+
+      UNION ALL
+
+      SELECT TOP 1
+        Id,
+        Nome,
+        Email,
+        Telefone,
+        EmailVerificado,
+        TelefoneVerificado,
+        Ativo,
+        IsBloqueado,
+        N'Fisioterapeuta' AS UsuarioTipo
+      FROM dbo.Fisioterapeutas
+      WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(Telefone, N''), N'+', N''), N' ', N''), N'-', N''), N'(', N''), N')', N'')
+            IN (@TelefoneDigits, @TelefoneLocalDigits);
+    `
+  );
+
+  const rows = result.recordset || [];
+  if (rows.length > 1) {
+    log('warn', 'Telefone ambíguo em redefinição de senha', {
+      telefoneMascarado: contatoProvider.mascararDestino('Telefone', `+${digits}`),
+      total: rows.length,
+    });
+    return { usuario: null, motivo: 'ambiguous' };
+  }
+
+  return { usuario: rows[0] || null, motivo: rows.length ? null : 'not_found' };
+}
+
+async function resolverUsuarioRedefinicao(pedido) {
+  if (pedido.canal === 'Telefone') {
+    const { usuario, motivo } = await buscarUsuarioPorTelefone(pedido.telefone);
+    const emailChave = usuario?.Email ? normalizeEmail(usuario.Email) : '';
+    return {
+      canal: pedido.canal,
+      destino: pedido.destino,
+      usuario,
+      motivo: emailChave ? motivo : (usuario ? 'missing_email' : motivo),
+      emailChave,
+    };
+  }
+
+  const { usuario, motivo } = await buscarUsuarioPorEmail(pedido.email);
+  return {
+    canal: pedido.canal,
+    destino: pedido.destino,
+    usuario,
+    motivo,
+    emailChave: pedido.email,
+  };
+}
+
 function usuarioAptoParaReset(usuario) {
   if (!usuario) return false;
   if (Number(usuario.Ativo ?? 0) !== 1) return false;
   if (Number(usuario.IsBloqueado ?? 0) === 1) return false;
   return true;
+}
+
+function contatoVerificadoParaReset(usuario, canal) {
+  if (!usuario) return false;
+  if (canal === 'Telefone') {
+    return Number(usuario.TelefoneVerificado ?? 0) === 1;
+  }
+  return Number(usuario.EmailVerificado ?? 0) === 1;
 }
 
 function invalidCodeError() {
@@ -199,11 +353,11 @@ async function cancelarRedefinicaoGerada({ id }) {
   );
 }
 
-export async function solicitarRedefinicaoSenha({ email } = {}, reqLike = null) {
-  const emailNorm = normalizeRequestEmail(email);
-  const { usuario } = await buscarUsuarioPorEmail(emailNorm);
+export async function solicitarRedefinicaoSenha(payload = {}, reqLike = null) {
+  const pedido = normalizarPedidoRedefinicao(payload);
+  const { canal, destino, usuario, emailChave } = await resolverUsuarioRedefinicao(pedido);
 
-  if (!usuarioAptoParaReset(usuario)) {
+  if (!usuarioAptoParaReset(usuario) || !emailChave || !contatoVerificadoParaReset(usuario, canal)) {
     return { sucesso: true, mensagem: GENERIC_MESSAGE };
   }
 
@@ -213,7 +367,7 @@ export async function solicitarRedefinicaoSenha({ email } = {}, reqLike = null) 
     salt,
     usuarioTipo: usuario.UsuarioTipo,
     usuarioId: usuario.Id,
-    email: emailNorm,
+    email: emailChave,
     codigo,
   });
   const expiraEm = new Date(Date.now() + RESET_EXPIRATION_MINUTES * 60 * 1000);
@@ -225,7 +379,7 @@ export async function solicitarRedefinicaoSenha({ email } = {}, reqLike = null) 
       (req) => req
         .input('UsuarioTipo', sql.NVarChar(30), usuario.UsuarioTipo)
         .input('UsuarioId', sql.Int, Number(usuario.Id))
-        .input('Email', sql.NVarChar(255), emailNorm)
+        .input('Email', sql.NVarChar(255), emailChave)
         .input('CodigoHash', sql.VarBinary(32), codigoHash)
         .input('CodigoSalt', sql.VarBinary(16), salt)
         .input('ExpiraEm', sql.DateTime2(7), expiraEm)
@@ -301,7 +455,7 @@ export async function solicitarRedefinicaoSenha({ email } = {}, reqLike = null) 
   } catch (err) {
     if (isUniqueViolation(err)) {
       log('warn', 'Colisão de reset de senha pendente', {
-        emailMascarado: mascararEmail(emailNorm),
+        emailMascarado: mascararEmail(emailChave),
         usuarioTipo: usuario.UsuarioTipo,
         usuarioId: usuario.Id,
       });
@@ -310,21 +464,30 @@ export async function solicitarRedefinicaoSenha({ email } = {}, reqLike = null) 
     throw err;
   }
 
-  const conteudo = montarEmailRedefinicaoSenha({
-    nome: usuario.Nome,
-    codigo,
-    expiraEmMinutos: RESET_EXPIRATION_MINUTES,
-  });
-
   try {
-    await contatoProvider.enviarCodigo({
-      canal: 'Email',
-      destino: emailNorm,
-      codigo,
-      assunto: conteudo.assunto,
-      html: conteudo.corpoHtml,
-      texto: conteudo.corpoTexto,
-    });
+    if (canal === 'Telefone') {
+      await contatoProvider.enviarCodigo({
+        canal: 'Telefone',
+        destino,
+        codigo,
+        texto: mensagemResetWhatsApp(codigo),
+      });
+    } else {
+      const conteudo = montarEmailRedefinicaoSenha({
+        nome: usuario.Nome,
+        codigo,
+        expiraEmMinutos: RESET_EXPIRATION_MINUTES,
+      });
+
+      await contatoProvider.enviarCodigo({
+        canal: 'Email',
+        destino,
+        codigo,
+        assunto: conteudo.assunto,
+        html: conteudo.corpoHtml,
+        texto: conteudo.corpoTexto,
+      });
+    }
   } catch (err) {
     await cancelarRedefinicaoGerada({ id: resetId });
     throw new HttpError(503, 'Não foi possível enviar o código de redefinição. Tente novamente.');
@@ -333,24 +496,26 @@ export async function solicitarRedefinicaoSenha({ email } = {}, reqLike = null) 
   return { sucesso: true, mensagem: GENERIC_MESSAGE };
 }
 
-export async function confirmarCodigoRedefinicaoSenha({ email, codigo } = {}) {
-  const emailNorm = normalizeRequestEmail(email);
-  const { usuario } = await buscarUsuarioPorEmail(emailNorm);
-  if (!usuarioAptoParaReset(usuario)) throw invalidCodeError();
+export async function confirmarCodigoRedefinicaoSenha(payload = {}) {
+  const dados = payload || {};
+  const pedido = normalizarPedidoRedefinicao(dados);
+  const { canal, usuario, emailChave } = await resolverUsuarioRedefinicao(pedido);
+  if (!usuarioAptoParaReset(usuario) || !emailChave || !contatoVerificadoParaReset(usuario, canal)) throw invalidCodeError();
 
-  await validarCodigoPendente({ usuario, email: emailNorm, codigo });
+  await validarCodigoPendente({ usuario, email: emailChave, codigo: dados.codigo });
   return { sucesso: true, mensagem: 'Código validado.' };
 }
 
-export async function redefinirSenha({ email, codigo, novaSenha } = {}) {
-  const emailNorm = normalizeRequestEmail(email);
-  const senhaNova = String(novaSenha || '');
+export async function redefinirSenha(payload = {}) {
+  const dados = payload || {};
+  const pedido = normalizarPedidoRedefinicao(dados);
+  const { canal, usuario, emailChave } = await resolverUsuarioRedefinicao(pedido);
+  const senhaNova = String(dados.novaSenha || '');
   validatePasswordStrength(senhaNova);
 
-  const { usuario } = await buscarUsuarioPorEmail(emailNorm);
-  if (!usuarioAptoParaReset(usuario)) throw invalidCodeError();
+  if (!usuarioAptoParaReset(usuario) || !emailChave || !contatoVerificadoParaReset(usuario, canal)) throw invalidCodeError();
 
-  const codigoRaw = String(codigo || '').replace(/\D/g, '');
+  const codigoRaw = String(dados.codigo || '').replace(/\D/g, '');
   if (codigoRaw.length !== 6) throw invalidCodeError();
 
   const senhaHash = await bcrypt.hash(senhaNova, 12);
@@ -360,7 +525,7 @@ export async function redefinirSenha({ email, codigo, novaSenha } = {}) {
     (req) => req
       .input('UsuarioTipo', sql.NVarChar(30), usuario.UsuarioTipo)
       .input('UsuarioId', sql.Int, Number(usuario.Id))
-      .input('Email', sql.NVarChar(255), emailNorm)
+      .input('Email', sql.NVarChar(255), emailChave)
       .input('Codigo', sql.NVarChar(6), codigoRaw)
       .input('SenhaHash', sql.NVarChar(256), senhaHash),
     `
@@ -424,7 +589,7 @@ export async function redefinirSenha({ email, codigo, novaSenha } = {}) {
     salt: row.CodigoSalt,
     usuarioTipo: usuario.UsuarioTipo,
     usuarioId: usuario.Id,
-    email: emailNorm,
+    email: emailChave,
     codigo: codigoRaw,
   });
 
@@ -451,7 +616,8 @@ export async function redefinirSenha({ email, codigo, novaSenha } = {}) {
       .input('UsuarioTipo', sql.NVarChar(30), usuario.UsuarioTipo)
       .input('UsuarioId', sql.Int, Number(usuario.Id))
       .input('SenhaHash', sql.NVarChar(256), senhaHash)
-      .input('ResetId', sql.Int, row.ResetId),
+      .input('ResetId', sql.Int, row.ResetId)
+      .input('Canal', sql.NVarChar(20), canal),
     `
       SET XACT_ABORT ON;
       BEGIN TRAN;
@@ -471,8 +637,16 @@ export async function redefinirSenha({ email, codigo, novaSenha } = {}) {
 
       UPDATE ${tabela}
       SET SenhaHash = @SenhaHash,
-          EmailVerificado = 1,
-          EmailVerificadoEm = COALESCE(EmailVerificadoEm, SYSDATETIME())
+          EmailVerificado = CASE WHEN @Canal = N'Email' THEN 1 ELSE EmailVerificado END,
+          EmailVerificadoEm = CASE
+            WHEN @Canal = N'Email' THEN COALESCE(EmailVerificadoEm, SYSDATETIME())
+            ELSE EmailVerificadoEm
+          END,
+          TelefoneVerificado = CASE WHEN @Canal = N'Telefone' THEN 1 ELSE TelefoneVerificado END,
+          TelefoneVerificadoEm = CASE
+            WHEN @Canal = N'Telefone' THEN COALESCE(TelefoneVerificadoEm, SYSDATETIME())
+            ELSE TelefoneVerificadoEm
+          END
       WHERE Id = @UsuarioId;
 
       UPDATE dbo.RefreshTokens

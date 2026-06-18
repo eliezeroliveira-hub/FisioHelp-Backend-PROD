@@ -1,3 +1,5 @@
+import { isValidCNPJ } from '../utils/identityValidators.js';
+
 const CONTACT_BLOCK_MESSAGE =
   'Mensagem bloqueada: não é permitido compartilhar links ou dados pessoais (telefone, e-mail, CPF/CNPJ, Pix).';
 
@@ -30,6 +32,24 @@ function firstMatch(text, pattern) {
   return match?.[0] ? String(match[0]).slice(0, 200) : null;
 }
 
+function firstValidCnpj(text) {
+  const conteudo = String(text || '');
+  const patterns = [
+    /\b[A-Z0-9]{2}[.\s]?[A-Z0-9]{3}[.\s]?[A-Z0-9]{3}[/\s]?[A-Z0-9]{4}[\s-]?\d{2}\b/gi,
+    /\b[A-Z0-9]{12}\d{2}\b/gi,
+  ];
+
+  for (const pattern of patterns) {
+    const matches = conteudo.matchAll(pattern);
+    for (const match of matches) {
+      const candidate = match?.[0] || '';
+      if (isValidCNPJ(candidate)) return candidate.slice(0, 200);
+    }
+  }
+
+  return null;
+}
+
 function detectPersonalData(text) {
   const conteudo = String(text || '');
   const trimmed = conteudo.trim();
@@ -41,7 +61,7 @@ function detectPersonalData(text) {
   const phoneBrPattern = /(\+?55\s*)?(\(?\d{2}\)?\s*)?(9?\d{4})[-\s.]?\d{4}\b/i;
   const manyDigitsPattern = /(?:\d[\s().-]?){10,14}\d/;
   const cpfPattern = /\b\d{3}[.\s-]?\d{3}[.\s-]?\d{3}[.\s-]?\d{2}\b/;
-  const cnpjPattern = /\b\d{2}[.\s]?\d{3}[.\s]?\d{3}[/\s]?\d{4}[\s-]?\d{2}\b/;
+  const cnpjDetectado = firstValidCnpj(conteudo);
 
   if (linkPattern.test(conteudo)) {
     return {
@@ -73,13 +93,13 @@ function detectPersonalData(text) {
     };
   }
 
-  if (cpfPattern.test(conteudo) || cnpjPattern.test(conteudo)) {
+  if (cpfPattern.test(conteudo) || cnpjDetectado) {
     return {
       blocked: true,
       motivo: 'DadoBancarioDetectado',
       trechoDetectado:
         firstMatch(conteudo, cpfPattern) ||
-        firstMatch(conteudo, cnpjPattern) ||
+        cnpjDetectado ||
         trimmed.slice(0, 200),
       mensagemUsuario: CONTACT_BLOCK_MESSAGE,
     };
@@ -125,7 +145,7 @@ function detectPersonalData(text) {
     (contactWords && (hasAtDomainOnly || hasDomainOnly || looksLikeHandle || shortDigits));
 
   if (
-    (mentionsPix && (emailFragment || shortDigits || phoneBrPattern.test(conteudo) || manyDigitsPattern.test(conteudo) || cpfPattern.test(conteudo) || cnpjPattern.test(conteudo))) ||
+    (mentionsPix && (emailFragment || shortDigits || phoneBrPattern.test(conteudo) || manyDigitsPattern.test(conteudo) || cpfPattern.test(conteudo) || cnpjDetectado)) ||
     blockedByFragments
   ) {
     return {

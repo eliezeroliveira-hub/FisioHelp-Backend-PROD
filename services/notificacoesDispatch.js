@@ -402,6 +402,22 @@ async function consultaAgendada({ consultaId, notificarPaciente = true, notifica
           mensagem: `Nova consulta com ${primeiroNome(consulta.PacienteNome, 'paciente')}${data ? ` em ${data}` : ''}.`,
           referenciaId: Number(consulta.Id),
           dados: payload
+        },
+        {
+          emailNotificacao: {
+            tipo: 'Agendamento',
+            titulo: 'Nova consulta',
+            mensagem: `Olá, ${primeiroNome(consulta.FisioterapeutaNome, 'Fisioterapeuta')},
+
+Você recebeu uma nova consulta com ${primeiroNome(consulta.PacienteNome, 'o paciente')}${data ? ` em ${data}` : ''}.
+
+Para confirmar ou recusar a consulta, abra o app FisioHelp e acesse Consultas.
+
+Atenciosamente,
+Equipe FisioHelp`,
+            referenciaId: Number(consulta.Id),
+            dados: payload
+          }
         }
       ));
     }
@@ -417,18 +433,33 @@ async function consultaConfirmada({ consultaId }) {
     if (!consulta) return null;
 
     const data = formatarDataHora(consulta.DataHora);
-    return enfileirarPushEEmail(
+    const payload = dadosBase('consulta_confirmada', {
+      consultaId: Number(consulta.Id),
+      pacienteId: Number(consulta.PacienteId),
+      fisioterapeutaId: Number(consulta.FisioterapeutaId)
+    });
+
+    await enfileirarPushEEmail(
       { usuarioTipo: 'Paciente', usuarioId: consulta.PacienteId },
       {
         tipo: 'Agendamento',
         titulo: 'Consulta confirmada',
         mensagem: `Sua consulta com ${primeiroNome(consulta.FisioterapeutaNome, 'o fisioterapeuta')}${data ? ` em ${data}` : ''} foi confirmada.`,
         referenciaId: Number(consulta.Id),
-        dados: dadosBase('consulta_confirmada', {
-          consultaId: Number(consulta.Id),
-          fisioterapeutaId: Number(consulta.FisioterapeutaId)
-        })
+        dados: payload
       }
+    );
+
+    return enfileirar(
+      { usuarioTipo: 'Fisioterapeuta', usuarioId: consulta.FisioterapeutaId },
+      {
+        tipo: 'Agendamento',
+        titulo: 'Consulta confirmada',
+        mensagem: `A consulta com ${primeiroNome(consulta.PacienteNome, 'o paciente')}${data ? ` em ${data}` : ''} foi confirmada.`,
+        referenciaId: Number(consulta.Id),
+        dados: payload
+      },
+      { canal: 'email', gravarInbox: true }
     );
   });
 }
@@ -454,7 +485,7 @@ async function consultaReagendada({ consultaId, consultaOriginalId = null, dataH
       dataHoraNova: consulta.DataHora ?? null
     });
 
-    await enfileirar(
+    await enfileirarPushEEmail(
       { usuarioTipo: 'Paciente', usuarioId: consulta.PacienteId },
       {
         tipo: 'Agendamento',
@@ -465,7 +496,7 @@ async function consultaReagendada({ consultaId, consultaOriginalId = null, dataH
       }
     );
 
-    return enfileirar(
+    return enfileirarPushEEmail(
       { usuarioTipo: 'Fisioterapeuta', usuarioId: consulta.FisioterapeutaId },
       {
         tipo: 'Agendamento',
@@ -643,6 +674,23 @@ async function pagamentoConfirmadoConsulta({ transacaoId = null, consultaId = nu
     if (!consulta) return null;
 
     const data = formatarDataHora(consulta.DataHora);
+    const payload = dadosBase('pagamento_consulta_confirmado', {
+      consultaId: Number(consulta.Id),
+      transacaoId: asId(transacaoId),
+      codigoContratacao: `AGD-${new Date().getFullYear()}-${String(Number(consulta.Id)).padStart(6, '0')}`,
+      contratacaoEm: new Date().toISOString(),
+      pacienteId: Number(consulta.PacienteId),
+      pacienteNome: consulta.PacienteNome ?? null,
+      fisioterapeutaId: Number(consulta.FisioterapeutaId),
+      fisioterapeutaNome: consulta.FisioterapeutaNome ?? null,
+      fisioterapeutaCrefito: consulta.FisioterapeutaCrefito ?? null,
+      fisioterapeutaCnpj: consulta.FisioterapeutaCnpj ?? null,
+      dataHoraConsulta: consulta.DataHora ?? null,
+      dataConsultaTexto: data,
+      enderecoAtendimento: enderecoAtendimentoConsulta(consulta) || null,
+      valorTotal: consulta.ValorConsulta ?? null
+    });
+
     return enfileirarPushEEmail(
       { usuarioTipo: 'Paciente', usuarioId: consulta.PacienteId },
       {
@@ -650,21 +698,7 @@ async function pagamentoConfirmadoConsulta({ transacaoId = null, consultaId = nu
         titulo: 'Pagamento confirmado',
         mensagem: `Recebemos seu pagamento referente à consulta${data ? ` de ${data}` : ''}.`,
         referenciaId: Number(consulta.Id),
-        dados: dadosBase('pagamento_consulta_confirmado', {
-          consultaId: Number(consulta.Id),
-          transacaoId: asId(transacaoId),
-          codigoContratacao: `AGD-${new Date().getFullYear()}-${String(Number(consulta.Id)).padStart(6, '0')}`,
-          contratacaoEm: new Date().toISOString(),
-          pacienteNome: consulta.PacienteNome ?? null,
-          fisioterapeutaId: Number(consulta.FisioterapeutaId),
-          fisioterapeutaNome: consulta.FisioterapeutaNome ?? null,
-          fisioterapeutaCrefito: consulta.FisioterapeutaCrefito ?? null,
-          fisioterapeutaCnpj: consulta.FisioterapeutaCnpj ?? null,
-          dataHoraConsulta: consulta.DataHora ?? null,
-          dataConsultaTexto: data,
-          enderecoAtendimento: enderecoAtendimentoConsulta(consulta) || null,
-          valorTotal: consulta.ValorConsulta ?? null
-        })
+        dados: payload
       }
     );
   });

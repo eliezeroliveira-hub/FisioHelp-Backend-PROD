@@ -6,6 +6,7 @@ import crypto from "crypto";
 import net from "net";
 import { ENV } from "../config/env.js";
 import { log } from "../config/logger.js";
+import { normalizeCNPJ } from "../utils/identityValidators.js";
 
 const REFRESH_DAYS = Number(ENV.REFRESH_TOKEN_DAYS || 30);
 const ACCESS_TOKEN_CACHE_FALLBACK_TTL_MS = 30 * 1000;
@@ -434,7 +435,7 @@ function enforceAcessoLogin(usuario) {
 async function findUserByIdentifier(pool, { email, cpf, cnpj }) {
   const valorEmail = email ? String(email).trim() : null;
   const valorCpf = cpf ? normalizeDigits(cpf) : null;
-  const valorCnpj = cnpj ? normalizeDigits(cnpj) : null;
+  const valorCnpj = cnpj ? normalizeCNPJ(cnpj) : null;
 
   if (!valorEmail && !valorCpf && !valorCnpj) return null;
 

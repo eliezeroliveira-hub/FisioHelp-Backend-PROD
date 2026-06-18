@@ -1177,54 +1177,26 @@ const pacotesService = {
       0
     );
     const statusNorm = status ? String(status).trim() : null;
+    const pacienteId = isPac ? Number(usuario.id) : null;
 
     const r = await queryWithContext(usuario, (req) => {
+      req.input('IsAdmin', sql.Bit, isAdm ? 1 : 0);
+      req.input('PacienteId', sql.Int, Number.isFinite(pacienteId) ? pacienteId : null);
       req.input('Status', sql.NVarChar(60), statusNorm);
       req.input('Limit', sql.Int, lim);
       req.input('Offset', sql.Int, off);
     }, `
-      ;WITH Base AS (
-        SELECT
-          p.Id,
-          p.FisioterapeutaId,
-          f.Nome AS NomeFisioterapeuta,
-          p.EspecialidadeId,
-          COALESCE(e.Nome, f.Especialidade) AS EspecialidadeFisioterapeuta,
-          p.NomePacote AS Nome,
-          p.QuantidadeConsultas,
-          ISNULL(p.ConsultasUtilizadas, 0) AS ConsultasUtilizadas,
-          CAST(p.ValorTotal AS DECIMAL(10,2)) AS ValorTotal,
-          CAST(ISNULL(p.ValorPago, 0) AS DECIMAL(10,2)) AS ValorPago,
-          p.DataCompra,
-          p.Validade,
-          p.Status,
-          p.CriadoEm,
-          p.PagoEm,
-          p.CanceladoEm
-        FROM dbo.Pacotes p
-        LEFT JOIN dbo.vw_FisioterapeutaPerfilPublico f
-          ON f.FisioterapeutaId = p.FisioterapeutaId
-        LEFT JOIN dbo.Especialidades e
-          ON e.Id = p.EspecialidadeId
-        WHERE
-          (
-            COALESCE(CAST(SESSION_CONTEXT(N'UsuarioTipo') AS NVARCHAR(40)), N'') = N'Admin'
-            OR (
-              CAST(SESSION_CONTEXT(N'UsuarioTipo') AS NVARCHAR(40)) = N'Paciente'
-              AND p.PacienteId = TRY_CONVERT(INT, SESSION_CONTEXT(N'UsuarioId'))
-            )
-          )
-          AND (@Status IS NULL OR p.Status = @Status)
-      )
-      SELECT COUNT(1) AS Total FROM Base;
+      SELECT COUNT(1) AS Total
+      FROM dbo.Pacotes p
+      WHERE
+        (@IsAdmin = 1 OR p.PacienteId = @PacienteId)
+        AND (@Status IS NULL OR p.Status = @Status);
 
-      ;WITH Base AS (
+      ;WITH Page AS (
         SELECT
           p.Id,
           p.FisioterapeutaId,
-          f.Nome AS NomeFisioterapeuta,
           p.EspecialidadeId,
-          COALESCE(e.Nome, f.Especialidade) AS EspecialidadeFisioterapeuta,
           p.NomePacote AS Nome,
           p.QuantidadeConsultas,
           ISNULL(p.ConsultasUtilizadas, 0) AS ConsultasUtilizadas,
@@ -1237,23 +1209,35 @@ const pacotesService = {
           p.PagoEm,
           p.CanceladoEm
         FROM dbo.Pacotes p
-        LEFT JOIN dbo.vw_FisioterapeutaPerfilPublico f
-          ON f.FisioterapeutaId = p.FisioterapeutaId
-        LEFT JOIN dbo.Especialidades e
-          ON e.Id = p.EspecialidadeId
         WHERE
-          (
-            COALESCE(CAST(SESSION_CONTEXT(N'UsuarioTipo') AS NVARCHAR(40)), N'') = N'Admin'
-            OR (
-              CAST(SESSION_CONTEXT(N'UsuarioTipo') AS NVARCHAR(40)) = N'Paciente'
-              AND p.PacienteId = TRY_CONVERT(INT, SESSION_CONTEXT(N'UsuarioId'))
-            )
-          )
+          (@IsAdmin = 1 OR p.PacienteId = @PacienteId)
           AND (@Status IS NULL OR p.Status = @Status)
+        ORDER BY p.CriadoEm DESC, p.Id DESC
+        OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY
       )
-      SELECT * FROM Base
-      ORDER BY CriadoEm DESC, Id DESC
-      OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
+      SELECT
+        p.Id,
+        p.FisioterapeutaId,
+        f.Nome AS NomeFisioterapeuta,
+        p.EspecialidadeId,
+        COALESCE(e.Nome, f.Especialidade) AS EspecialidadeFisioterapeuta,
+        p.Nome,
+        p.QuantidadeConsultas,
+        p.ConsultasUtilizadas,
+        p.ValorTotal,
+        p.ValorPago,
+        p.DataCompra,
+        p.Validade,
+        p.Status,
+        p.CriadoEm,
+        p.PagoEm,
+        p.CanceladoEm
+      FROM Page p
+      LEFT JOIN dbo.Fisioterapeutas f
+        ON f.Id = p.FisioterapeutaId
+      LEFT JOIN dbo.Especialidades e
+        ON e.Id = p.EspecialidadeId
+      ORDER BY p.CriadoEm DESC, p.Id DESC;
     `);
 
     return {

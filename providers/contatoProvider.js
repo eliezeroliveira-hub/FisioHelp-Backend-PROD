@@ -4,6 +4,7 @@ import { EmailClient } from '@azure/communication-email';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { ENV } from '../config/env.js';
 import { log } from '../config/logger.js';
+import whatsappProvider, { isWhatsAppProviderReal } from './whatsappProvider.js';
 
 const MODE = String(ENV.CONTATO_PROVIDER_MODE || 'stub').trim().toLowerCase();
 
@@ -48,6 +49,14 @@ function mascararDestino(canal, destino) {
 
 function textoFallback(codigo) {
   return `Seu codigo de verificacao FisioHelp e: ${codigo}`;
+}
+
+function textoWhatsAppFallback(codigo) {
+  return [
+    `Seu codigo de verificacao FisioHelp e: ${codigo}`,
+    '',
+    'Nao compartilhe este codigo. Ele expira em 10 minutos.',
+  ].join('\n');
 }
 
 function buildEmailBody({ html, texto }) {
@@ -242,6 +251,42 @@ async function enviarCodigo({ canal, destino, codigo, assunto, html, texto }) {
   const textBody = String(texto || textoFallback(codigo)).trim();
   const isProd = String(ENV.NODE_ENV || '').toLowerCase() === 'production';
 
+  if (canalNorm === 'Telefone') {
+    if (!destino || !String(destino).trim()) {
+      throw new Error('Destino de telefone não informado.');
+    }
+
+    const mensagem = String(texto || textoWhatsAppFallback(codigo)).trim();
+    const resultado = await whatsappProvider.enviarWhatsApp({
+      destinatario: destino,
+      mensagem,
+    });
+
+    if (resultado.resultado !== 'sucesso') {
+      const err = new Error(resultado.erro || 'Falha ao enviar código via WhatsApp.');
+      err.resultado = resultado.resultado;
+      throw err;
+    }
+
+    log('info', `Código de verificação enviado por ${isWhatsAppProviderReal ? 'Twilio WhatsApp' : 'stub WhatsApp'}`, {
+      canal: canalNorm,
+      destinoMascarado,
+      messageId: resultado.messageId || null,
+      ...(isProd || isWhatsAppProviderReal ? {} : { codigo }),
+    });
+
+    return {
+      ok: true,
+      modo: isWhatsAppProviderReal ? 'twilio' : 'stub',
+      messageId: resultado.messageId || null,
+      ...(isProd || isWhatsAppProviderReal ? {} : { codigo }),
+    };
+  }
+
+  if (canalNorm !== 'Email') {
+    throw new Error(`Canal ${canalNorm} não suportado pelo contatoProvider.`);
+  }
+
   if (MODE === 'stub') {
     log('info', '[contatoProvider:stub] Código de verificação gerado', {
       canal: canalNorm,
@@ -254,10 +299,6 @@ async function enviarCodigo({ canal, destino, codigo, assunto, html, texto }) {
 
   if (!isContatoProviderReal) {
     throw new Error(`CONTATO_PROVIDER_MODE inválido: ${MODE}`);
-  }
-
-  if (canalNorm !== 'Email') {
-    throw new Error(`Canal ${canalNorm} não suportado pelo contatoProvider ${MODE}.`);
   }
 
   if (!destino || !String(destino).trim()) {
