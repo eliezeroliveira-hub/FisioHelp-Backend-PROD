@@ -3,6 +3,7 @@ import { ENV } from '../config/env.js';
 import { log } from '../config/logger.js';
 import { enviarEmail } from '../providers/emailProvider.js';
 import { enviarPush } from '../providers/pushProvider.js';
+import { enviarWhatsApp } from '../providers/whatsappProvider.js';
 import { HttpError } from '../utils/httpError.js';
 import { isValidEmail, normalizeEmail } from '../utils/identityValidators.js';
 import { queryWithContext } from './_queryWithContext.js';
@@ -11,7 +12,7 @@ import emailSupressaoService from './emailSupressaoService.js';
 
 const USUARIOS_VALIDOS = new Set(['Paciente', 'Fisioterapeuta']);
 const PLATAFORMAS_VALIDAS = new Set(['ios', 'android']);
-const CANAIS_VALIDOS = new Set(['push', 'email']);
+const CANAIS_VALIDOS = new Set(['push', 'email', 'whatsapp']);
 const TIPOS_VALIDOS = new Set([
   'Promocao',
   'Chat',
@@ -101,6 +102,22 @@ function normalizarCanaisAtivos(canaisAtivos) {
 
 function isBitAtivo(value) {
   return value === true || Number(value) === 1;
+}
+
+function normalizarTelefoneE164(value) {
+  const raw = String(value || '').trim();
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) return '';
+
+  if ((digits.length === 12 || digits.length === 13) && digits.startsWith('55')) {
+    return `+${digits}`;
+  }
+
+  if (digits.length === 10 || digits.length === 11) {
+    return `+55${digits}`;
+  }
+
+  return '';
 }
 
 function validarTipo(tipo) {
@@ -464,6 +481,48 @@ async function resolverEmailUsuario(usuarioTipo, usuarioId) {
   return { email, erro: null };
 }
 
+async function resolverTelefoneUsuario(usuarioTipo, usuarioId) {
+  const destino = validarUsuarioDestino(usuarioTipo, usuarioId);
+  const ctx = contextoSistema();
+  let result;
+
+  if (destino.usuarioTipo === 'Paciente') {
+    result = await queryWithContext(ctx, (req) => {
+      req.input('Id', sql.Int, destino.usuarioId);
+    }, `
+      SELECT TOP (1) [Telefone], [TelefoneVerificado]
+      FROM [dbo].[Pacientes]
+      WHERE [Id] = @Id;
+    `, { requireContext: true });
+  } else {
+    result = await queryWithContext(ctx, (req) => {
+      req.input('Id', sql.Int, destino.usuarioId);
+    }, `
+      SELECT TOP (1) [Telefone], [TelefoneVerificado]
+      FROM [dbo].[Fisioterapeutas]
+      WHERE [Id] = @Id;
+    `, { requireContext: true });
+  }
+
+  const row = result.recordset?.[0] || null;
+  const telefoneRaw = String(row?.Telefone || '').trim();
+
+  if (!telefoneRaw) {
+    return { telefone: null, erro: 'sem telefone cadastrado' };
+  }
+
+  const telefone = normalizarTelefoneE164(telefoneRaw);
+  if (!telefone) {
+    return { telefone: null, erro: 'telefone inválido' };
+  }
+
+  if (!isBitAtivo(row?.TelefoneVerificado)) {
+    return { telefone: null, erro: 'telefone não verificado' };
+  }
+
+  return { telefone, erro: null };
+}
+
 async function desativarDispositivoPorId(id, usuario = null) {
   const dispositivoId = normalizarIdPositivo(id, 'dispositivoId');
   const ctx = usuario?.tipo && usuario?.id ? usuario : contextoSistema();
@@ -657,12 +716,67 @@ async function processarEmailItem(item, usuario = null) {
   return { status: 'FalhaDefinitiva', canal: 'email', erro };
 }
 
+function montarMensagemWhatsAppItem(item) {
+  const titulo = String(item?.Titulo || '').trim();
+  const mensagem = String(item?.Mensagem || '').trim();
+
+  if (titulo && mensagem) return `${titulo}\n\n${mensagem}`;
+  return mensagem || titulo;
+}
+
+async function processarWhatsappItem(item, usuario = null) {
+  const filaId = normalizarIdPositivo(item?.Id, 'filaId');
+  const resolucao = await resolverTelefoneUsuario(item.UsuarioTipo, item.UsuarioId);
+
+  if (!resolucao.telefone) {
+    await marcarFalhaDefinitiva(filaId, resolucao.erro || 'sem telefone cadastrado', usuario);
+    return { status: 'FalhaDefinitiva', canal: 'whatsapp', motivo: 'telefone_indisponivel' };
+  }
+
+  let resultado;
+  try {
+    resultado = await enviarWhatsApp({
+      destinatario: resolucao.telefone,
+      mensagem: montarMensagemWhatsAppItem(item),
+    });
+  } catch (erro) {
+    resultado = {
+      resultado: 'tempFalha',
+      erro: erro?.message || 'Falha temporária no provider de WhatsApp.',
+    };
+  }
+
+  const classificacao = classificarResultadoProvider(resultado);
+  const erro = resultado?.erro || (
+    classificacao === 'invalido'
+      ? 'Destinatário de WhatsApp inválido.'
+      : 'Falha permanente ao enviar WhatsApp.'
+  );
+
+  if (classificacao === 'sucesso') {
+    await marcarEnviado(filaId, usuario);
+    return { status: 'Enviado', canal: 'whatsapp', messageId: resultado?.messageId || null };
+  }
+
+  if (classificacao === 'tempFalha') {
+    await marcarFalhaTemporaria(filaId, erro, calcularBackoffSeg(item.Tentativas), usuario);
+    return { status: 'FalhaTemporaria', canal: 'whatsapp', erro };
+  }
+
+  await marcarFalhaDefinitiva(filaId, erro, usuario);
+  return { status: 'FalhaDefinitiva', canal: 'whatsapp', erro };
+}
+
 async function processarItem(item, usuario = null) {
   const filaId = normalizarIdPositivo(item?.Id, 'filaId');
   const canal = validarCanal(item?.Canal || 'push');
 
   if (canal === 'email') {
     return processarEmailItem(item, usuario);
+  }
+
+  if (canal === 'whatsapp') {
+    return processarWhatsappItem(item, usuario);
   }
 
   if (canal === 'push') {
@@ -682,6 +796,7 @@ const notificacoesService = {
   reivindicarLote,
   listarDispositivosAtivos,
   resolverEmailUsuario,
+  resolverTelefoneUsuario,
   desativarDispositivoPorId,
   marcarEnviado,
   marcarFalhaTemporaria,
@@ -699,6 +814,7 @@ export {
   reivindicarLote,
   listarDispositivosAtivos,
   resolverEmailUsuario,
+  resolverTelefoneUsuario,
   desativarDispositivoPorId,
   marcarEnviado,
   marcarFalhaTemporaria,

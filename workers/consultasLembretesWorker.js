@@ -38,6 +38,7 @@ function limitarTexto(value, max = 60) {
 const config = {
   enabled: boolEnv(process.env.CONSULTA_LEMBRETE_WORKER_ENABLED, ENV.NODE_ENV !== 'production'),
   emailEnabled: boolEnv(process.env.CONSULTA_LEMBRETE_EMAIL_ENABLED, true),
+  whatsappEnabled: boolEnv(process.env.CONSULTA_LEMBRETE_WHATSAPP_ENABLED, true),
   intervalMs: intEnv(process.env.CONSULTA_LEMBRETE_WORKER_INTERVAL_MS, 10 * 60 * 1000, { min: 60_000, max: 3_600_000 }),
   horasAntes: intEnv(process.env.CONSULTA_LEMBRETE_HORAS_ANTES, 24, { min: 3, max: 168 }),
   batchSize: intEnv(process.env.CONSULTA_LEMBRETE_BATCH_SIZE, 50, { min: 1, max: 100 }),
@@ -60,6 +61,7 @@ async function buscarPendencias(usuario) {
       req.input('HorasAntes', sql.Int, config.horasAntes);
       req.input('MinHorasAntes', sql.Int, MIN_HORAS_ANTES);
       req.input('EmailEnabled', sql.Bit, config.emailEnabled ? 1 : 0);
+      req.input('WhatsAppEnabled', sql.Bit, config.whatsappEnabled ? 1 : 0);
     },
     `
       ;WITH elegiveis AS (
@@ -94,7 +96,8 @@ async function buscarPendencias(usuario) {
         pendencias.HoraTexto,
         pendencias.DestinatarioPapel,
         pendencias.PrecisaPush,
-        pendencias.PrecisaEmail
+        pendencias.PrecisaEmail,
+        pendencias.PrecisaWhatsApp
       FROM (
         SELECT
           N'Paciente' AS UsuarioTipo,
@@ -130,7 +133,18 @@ async function buscarPendencias(usuario) {
               AND fn.ReferenciaId = e.ConsultaId
               AND JSON_VALUE(fn.DadosJson, '$.tipo') = N'consulta_lembrete_24h'
               AND JSON_VALUE(fn.DadosJson, '$.dataHoraChave') = e.DataHoraChave
-          ) THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS PrecisaEmail
+          ) THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS PrecisaEmail,
+          CASE WHEN @WhatsAppEnabled = 1 AND NOT EXISTS (
+            SELECT 1
+            FROM dbo.FilaNotificacoes fn
+            WHERE fn.UsuarioTipo = N'Paciente'
+              AND fn.UsuarioId = e.PacienteId
+              AND fn.Canal = N'whatsapp'
+              AND fn.Tipo = N'Agendamento'
+              AND fn.ReferenciaId = e.ConsultaId
+              AND JSON_VALUE(fn.DadosJson, '$.tipo') = N'consulta_lembrete_24h'
+              AND JSON_VALUE(fn.DadosJson, '$.dataHoraChave') = e.DataHoraChave
+          ) THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS PrecisaWhatsApp
         FROM elegiveis e
 
         UNION ALL
@@ -169,10 +183,21 @@ async function buscarPendencias(usuario) {
               AND fn.ReferenciaId = e.ConsultaId
               AND JSON_VALUE(fn.DadosJson, '$.tipo') = N'consulta_lembrete_24h'
               AND JSON_VALUE(fn.DadosJson, '$.dataHoraChave') = e.DataHoraChave
-          ) THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS PrecisaEmail
+          ) THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS PrecisaEmail,
+          CASE WHEN @WhatsAppEnabled = 1 AND NOT EXISTS (
+            SELECT 1
+            FROM dbo.FilaNotificacoes fn
+            WHERE fn.UsuarioTipo = N'Fisioterapeuta'
+              AND fn.UsuarioId = e.FisioterapeutaId
+              AND fn.Canal = N'whatsapp'
+              AND fn.Tipo = N'Agendamento'
+              AND fn.ReferenciaId = e.ConsultaId
+              AND JSON_VALUE(fn.DadosJson, '$.tipo') = N'consulta_lembrete_24h'
+              AND JSON_VALUE(fn.DadosJson, '$.dataHoraChave') = e.DataHoraChave
+          ) THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS PrecisaWhatsApp
         FROM elegiveis e
       ) pendencias
-      WHERE pendencias.PrecisaPush = 1 OR pendencias.PrecisaEmail = 1
+      WHERE pendencias.PrecisaPush = 1 OR pendencias.PrecisaEmail = 1 OR pendencias.PrecisaWhatsApp = 1
       ORDER BY pendencias.DataHora ASC, pendencias.ConsultaId ASC, pendencias.UsuarioTipo ASC;
     `,
     { requireContext: true }
@@ -226,6 +251,20 @@ Equipe FisioHelp`,
       };
     }
 
+    if (canal === 'whatsapp') {
+      return {
+        tipo: 'Agendamento',
+        titulo: 'Lembrete FisioHelp:',
+        mensagem: `Você tem uma consulta com ${nomeFisioterapeutaCompleto} se aproximando.
+
+Data e hora: ${data} às ${hora}
+
+Para ver detalhes e orientações, abra o app FisioHelp e acesse Consultas.`,
+        referenciaId: consultaId,
+        dados,
+      };
+    }
+
     return {
       tipo: 'Agendamento',
       titulo: 'Lembrete da sua consulta',
@@ -256,6 +295,20 @@ Equipe FisioHelp`,
     };
   }
 
+  if (canal === 'whatsapp') {
+    return {
+      tipo: 'Agendamento',
+      titulo: 'Lembrete FisioHelp:',
+      mensagem: `Você tem uma consulta com ${nomePacienteCompleto} se aproximando.
+
+Data e hora: ${data} às ${hora}
+
+Para ver detalhes e orientações, abra o app FisioHelp e acesse Consultas.`,
+      referenciaId: consultaId,
+      dados,
+    };
+  }
+
   return {
     tipo: 'Agendamento',
     titulo: 'Lembrete de consulta',
@@ -266,7 +319,7 @@ Equipe FisioHelp`,
 }
 
 async function enfileirarCanal(pendencia, canal) {
-  const gravarInbox = canal !== 'email';
+  const gravarInbox = canal === 'push';
   await notificacoesService.enfileirarNotificacao(
     {
       usuarioTipo: pendencia.UsuarioTipo,
@@ -294,6 +347,7 @@ export async function tick() {
       const canais = [];
       if (pendencia.PrecisaPush) canais.push('push');
       if (pendencia.PrecisaEmail) canais.push('email');
+      if (pendencia.PrecisaWhatsApp) canais.push('whatsapp');
 
       for (const canal of canais) {
         try {
@@ -351,6 +405,7 @@ export function startConsultasLembretesWorker() {
     minHorasAntes: MIN_HORAS_ANTES,
     batchSize: config.batchSize,
     emailEnabled: config.emailEnabled,
+    whatsappEnabled: config.whatsappEnabled,
   });
 
   return timer;

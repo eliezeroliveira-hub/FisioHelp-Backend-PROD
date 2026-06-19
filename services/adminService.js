@@ -238,35 +238,40 @@ const adminService = {
         .input('Offset', sql.Int,           offsetNum),
       `
         SELECT
-          Id,
-          FisioterapeutaId,
-          NomeFisioterapeuta,
-          TipoDocumento,
-          Status,
-          DataEnvio,
-          DataValidacao,
-          CaminhoArquivo,
-          MotivoRejeicao,
-          FonteValidacao,
-          StatusVisual,
+          d.Id,
+          d.FisioterapeutaId,
+          d.NomeFisioterapeuta,
+          d.TipoDocumento,
+          d.Status,
+          d.DataEnvio,
+          d.DataValidacao,
+          d.CaminhoArquivo,
+          d.MotivoRejeicao,
+          d.FonteValidacao,
+          d.StatusVisual,
+          f.Estado AS FisioterapeutaEstado,
+          f.CREFITO AS FisioterapeutaCrefito,
           COUNT(*) OVER() AS Total
-        FROM analytics.vw_FisioDocumentosValidacao
+        FROM analytics.vw_FisioDocumentosValidacao d
+        LEFT JOIN dbo.Fisioterapeutas f ON f.Id = d.FisioterapeutaId
         WHERE
-          (@Status IS NULL OR Status = @Status)
+          (@Status IS NULL OR d.Status = @Status)
           AND (@Busca IS NULL OR (
-            NomeFisioterapeuta LIKE @Busca
-            OR TipoDocumento   LIKE @Busca
+            d.NomeFisioterapeuta LIKE @Busca
+            OR d.TipoDocumento   LIKE @Busca
+            OR d.CaminhoArquivo  LIKE @Busca
+            OR f.CREFITO         LIKE @Busca
           ))
         ORDER BY
-          CASE Status
+          CASE d.Status
             WHEN N'Pendente'     THEN 1
             WHEN N'Desconhecido' THEN 2
             WHEN N'Reprovado'    THEN 3
             WHEN N'Aprovado'     THEN 4
             ELSE 5
           END,
-          CASE WHEN DataEnvio IS NULL THEN 1 ELSE 0 END,
-          DataEnvio ASC
+          CASE WHEN d.DataEnvio IS NULL THEN 1 ELSE 0 END,
+          d.DataEnvio ASC
         OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
       `
     );

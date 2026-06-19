@@ -2,6 +2,7 @@ import { ENV } from '../config/env.js';
 import { log } from '../config/logger.js';
 import { isEmailProviderReal } from '../providers/emailProvider.js';
 import { isProviderReal as isPushProviderReal } from '../providers/pushProvider.js';
+import { isWhatsAppProviderReal } from '../providers/whatsappProvider.js';
 import notificacoesService from '../services/notificacoesService.js';
 
 function boolEnv(value, fallback = true) {
@@ -46,6 +47,7 @@ function canaisAtivos() {
 
   if (dev || isPushProviderReal) canais.push('push');
   if (dev || isEmailProviderReal) canais.push('email');
+  if (dev || isWhatsAppProviderReal) canais.push('whatsapp');
 
   return canais;
 }
@@ -129,6 +131,9 @@ export function startNotificacoesWorker() {
   if (isProduction() && !isEmailProviderReal) {
     log('warn', 'Canal email não será reivindicado em produção porque EMAIL_PROVIDER_MODE está em stub.');
   }
+  if (isProduction() && !isWhatsAppProviderReal) {
+    log('warn', 'Canal whatsapp não será reivindicado em produção porque WHATSAPP_PROVIDER_MODE está em stub.');
+  }
 
   timer = setInterval(() => {
     tick().catch((err) => {
@@ -150,6 +155,7 @@ export function startNotificacoesWorker() {
     batchSize: config.batchSize,
     pushProviderReal: isPushProviderReal,
     emailProviderReal: isEmailProviderReal,
+    whatsappProviderReal: isWhatsAppProviderReal,
     canaisAtivos: canais,
   });
 

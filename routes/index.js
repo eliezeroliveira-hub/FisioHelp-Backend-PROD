@@ -38,6 +38,7 @@ import parametrosSistemaRoutes from './parametrosSistema.js';
 import cadastroRoutes from './cadastro.js';
 import notificacoesRoutes from './notificacoes.js';
 import notificacoesWebhooksRoutes from './notificacoesWebhooks.js';
+import contatoPublicoRoutes from './contatoPublico.js';
 
 
 //  Middlewares globais
@@ -76,6 +77,7 @@ router.use('/pagamentos', pagamentosGatewayRoutes);
 router.use('/notificacoes/webhook', notificacoesWebhooksRoutes);
 router.use('/parametros-sistema', parametrosSistemaRoutes);
 router.use('/arquivos', arquivosRoutes);
+router.use('/contato-publico', contatoPublicoRoutes);
 
 /* ----------------------------------------
     Administração (Painel Admin)

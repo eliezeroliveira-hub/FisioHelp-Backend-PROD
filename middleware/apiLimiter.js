@@ -13,6 +13,14 @@ const emailWebhookWindowMs = parsePositiveInt(process.env.EMAIL_WEBHOOK_RATE_LIM
 const emailWebhookMax = parsePositiveInt(process.env.EMAIL_WEBHOOK_RATE_LIMIT_MAX, 300);
 const twilioWhatsappWebhookWindowMs = parsePositiveInt(process.env.TWILIO_WHATSAPP_WEBHOOK_RATE_LIMIT_WINDOW_MS, 60 * 1000);
 const twilioWhatsappWebhookMax = parsePositiveInt(process.env.TWILIO_WHATSAPP_WEBHOOK_RATE_LIMIT_MAX, 300);
+const contatoPublicoWindowMs = parsePositiveInt(process.env.CONTATO_PUBLICO_RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000);
+const contatoPublicoMax = parsePositiveInt(process.env.CONTATO_PUBLICO_RATE_LIMIT_MAX, 5);
+const contatoPublicoEmailWindowMs = parsePositiveInt(process.env.CONTATO_PUBLICO_EMAIL_RATE_LIMIT_WINDOW_MS, 30 * 60 * 1000);
+const contatoPublicoEmailMax = parsePositiveInt(process.env.CONTATO_PUBLICO_EMAIL_RATE_LIMIT_MAX, 3);
+
+function normalizarEmailRateLimit(value) {
+  return String(value || '').trim().toLowerCase();
+}
 
 export const apiLimiter = rateLimit({
   windowMs,
@@ -52,6 +60,23 @@ export const twilioWhatsappWebhookLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { erro: 'Muitos eventos de WhatsApp recebidos. Tente novamente em instantes.' }
+});
+
+export const contatoPublicoIpLimiter = rateLimit({
+  windowMs: contatoPublicoWindowMs,
+  max: contatoPublicoMax,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { erro: 'Muitas mensagens enviadas. Tente novamente em alguns minutos.' }
+});
+
+export const contatoPublicoEmailLimiter = rateLimit({
+  windowMs: contatoPublicoEmailWindowMs,
+  max: contatoPublicoEmailMax,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `email:${normalizarEmailRateLimit(req.body?.email) || 'nao-informado'}`,
+  message: { erro: 'Muitas mensagens enviadas para este e-mail. Tente novamente mais tarde.' }
 });
 
 export default apiLimiter;
