@@ -3,6 +3,7 @@ import { log } from '../config/logger.js';
 import { sql } from '../config/dbConfig.js';
 import { queryWithContext } from '../services/_queryWithContext.js';
 import notificacoesService from '../services/notificacoesService.js';
+import { agoraBrasilDate } from '../utils/appDateTime.js';
 
 function boolEnv(value, fallback = false) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -48,6 +49,7 @@ async function buscarPendencias(usuario) {
       req.input('DelayMinutes', sql.Int, config.delayMinutes);
       req.input('LookbackDays', sql.Int, config.lookbackDays);
       req.input('EmailEnabled', sql.Bit, config.emailEnabled ? 1 : 0);
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     },
     `
       ;WITH ultimas AS (
@@ -73,8 +75,8 @@ async function buscarPendencias(usuario) {
         FROM ultimas
         WHERE rn = 1
           AND DataEncerramento IS NOT NULL
-          AND DATEDIFF(MINUTE, DataEncerramento, SYSDATETIME()) >= @DelayMinutes
-          AND DataEncerramento >= DATEADD(DAY, -@LookbackDays, SYSDATETIME())
+          AND DATEDIFF(MINUTE, DataEncerramento, @AgoraBrasil) >= @DelayMinutes
+          AND DataEncerramento >= DATEADD(DAY, -@LookbackDays, @AgoraBrasil)
       )
       SELECT TOP (@BatchSize)
         pendencias.UsuarioTipo,

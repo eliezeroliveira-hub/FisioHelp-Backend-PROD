@@ -3,6 +3,7 @@ import { log } from '../config/logger.js';
 import { sql } from '../config/dbConfig.js';
 import { queryWithContext } from '../services/_queryWithContext.js';
 import notificacoesService from '../services/notificacoesService.js';
+import { agoraBrasilDate } from '../utils/appDateTime.js';
 
 function boolEnv(value, fallback = false) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -62,6 +63,7 @@ async function buscarPendencias(usuario) {
       req.input('MinHorasAntes', sql.Int, MIN_HORAS_ANTES);
       req.input('EmailEnabled', sql.Bit, config.emailEnabled ? 1 : 0);
       req.input('WhatsAppEnabled', sql.Bit, config.whatsappEnabled ? 1 : 0);
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     },
     `
       ;WITH elegiveis AS (
@@ -79,8 +81,8 @@ async function buscarPendencias(usuario) {
         INNER JOIN dbo.Pacientes p ON p.Id = c.PacienteId
         INNER JOIN dbo.Fisioterapeutas f ON f.Id = c.FisioterapeutaId
         WHERE LTRIM(RTRIM(ISNULL(c.Status, N''))) = N'Confirmada'
-          AND c.DataHora > DATEADD(HOUR, @MinHorasAntes, SYSDATETIME())
-          AND c.DataHora <= DATEADD(HOUR, @HorasAntes, SYSDATETIME())
+          AND c.DataHora > DATEADD(HOUR, @MinHorasAntes, @AgoraBrasil)
+          AND c.DataHora <= DATEADD(HOUR, @HorasAntes, @AgoraBrasil)
       )
       SELECT TOP (@BatchSize)
         pendencias.UsuarioTipo,

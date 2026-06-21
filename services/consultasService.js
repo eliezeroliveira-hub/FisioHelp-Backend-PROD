@@ -12,6 +12,7 @@ import {
 } from './avaliacoesService.js';
 import { HttpError } from '../utils/httpError.js';
 import { log } from '../config/logger.js';
+import { agoraBrasilDate, getAppTimeZoneParts } from '../utils/appDateTime.js';
 
 /**
  * Executa uma query garantindo SESSION_CONTEXT no MESMO batch/Request.
@@ -84,17 +85,17 @@ function ensureAgendamentoAPartirDeAmanha(isoLike, fieldName = 'DataHora') {
   if (!dia) {
     const dt = new Date(s);
     if (Number.isNaN(dt.getTime())) throw new HttpError(400, `${fieldName} inválida.`);
-    const y = dt.getFullYear();
-    const mo = String(dt.getMonth() + 1).padStart(2, '0');
-    const d = String(dt.getDate()).padStart(2, '0');
+    const y = dt.getUTCFullYear();
+    const mo = String(dt.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(dt.getUTCDate()).padStart(2, '0');
     dia = `${y}-${mo}-${d}`;
   }
 
-  const now = new Date();
-  const amanha = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-  const y2 = amanha.getFullYear();
-  const mo2 = String(amanha.getMonth() + 1).padStart(2, '0');
-  const d2 = String(amanha.getDate()).padStart(2, '0');
+  const hoje = getAppTimeZoneParts();
+  const amanha = new Date(Date.UTC(hoje.year, hoje.month - 1, hoje.day + 1));
+  const y2 = amanha.getUTCFullYear();
+  const mo2 = String(amanha.getUTCMonth() + 1).padStart(2, '0');
+  const d2 = String(amanha.getUTCDate()).padStart(2, '0');
   const minDia = `${y2}-${mo2}-${d2}`;
 
   if (dia < minDia) {
@@ -302,6 +303,7 @@ async function prepararCancelamentoReembolsoAsaasArrependimento(consultaId, paci
     req.input('ConsultaId', sql.Int, consultaId);
     req.input('PacienteId', sql.Int, pacienteId);
     req.input('Motivo', sql.NVarChar(400), motivo);
+    req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
   }, `
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
@@ -357,7 +359,7 @@ async function prepararCancelamentoReembolsoAsaasArrependimento(consultaId, paci
       WHERE f.Id = @FisioterapeutaId;
 
       IF @ToleranciaCancelamentoMinutos < 0 SET @ToleranciaCancelamentoMinutos = 0;
-      IF SYSDATETIME() >= DATEADD(MINUTE, -@ToleranciaCancelamentoMinutos, @DataHora)
+      IF @AgoraBrasil >= DATEADD(MINUTE, -@ToleranciaCancelamentoMinutos, @DataHora)
         THROW 51204, 'Cancelamento só é permitido antes da data/hora agendada ou antes da tolerência definida pelo fisioterapeuta.', 1;
 
       IF @PagamentoViaPlataforma <> 1 OR @OrigemPagamento <> N'Plataforma'
@@ -385,12 +387,12 @@ async function prepararCancelamentoReembolsoAsaasArrependimento(consultaId, paci
       IF @DataCompra IS NULL
         THROW 51209, 'Não foi possível determinar a data da compra na transação.', 1;
 
-      IF SYSDATETIME() > DATEADD(DAY, 7, @DataCompra)
+      IF @AgoraBrasil > DATEADD(DAY, 7, @DataCompra)
         THROW 51210, 'Fora do prazo de 7 dias do arrependimento.', 1;
 
       UPDATE dbo.Consultas
       SET Status = N'Cancelada',
-          DataEncerramento = COALESCE(DataEncerramento, SYSDATETIME()),
+          DataEncerramento = COALESCE(DataEncerramento, @AgoraBrasil),
           MotivoEncerramento = COALESCE(NULLIF(@Motivo, N''), MotivoEncerramento, @MotivoBase),
           ChatLiberado = 0,
           ChatLiberadoEm = NULL
@@ -421,9 +423,9 @@ async function prepararCancelamentoReembolsoAsaasArrependimento(consultaId, paci
             ELSE N'LOCAL_REQUESTED'
           END,
           GatewayRefundDescricao = LEFT(@MotivoEnc, 500),
-          GatewayRefundSolicitadoEm = COALESCE(GatewayRefundSolicitadoEm, SYSDATETIME()),
+          GatewayRefundSolicitadoEm = COALESCE(GatewayRefundSolicitadoEm, @AgoraBrasil),
           GatewayUltimoEvento = N'FISIOHELP_CANCELAMENTO_ARREPENDIMENTO',
-          GatewayAtualizadoEm = SYSDATETIME(),
+          GatewayAtualizadoEm = @AgoraBrasil,
           GatewayErroMensagem = NULL
       WHERE Id = @TransacaoId;
 
@@ -442,7 +444,7 @@ async function prepararCancelamentoReembolsoAsaasArrependimento(consultaId, paci
           NULL,
           N'Sistema',
           N'Pendente',
-          SYSDATETIME(),
+          @AgoraBrasil,
           LEFT(CONCAT(N'Solicitação de estorno Asaas | ', @MotivoEnc), 500)
         );
       END
@@ -475,6 +477,7 @@ async function cancelarConsultaPagaComCreditoLivre(consultaId, pacienteId, motiv
       req.input('ConsultaId', sql.Int, consultaId);
       req.input('PacienteId', sql.Int, pacienteId);
       req.input('Motivo', sql.NVarChar(400), motivo);
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       BEGIN TRY
         BEGIN TRAN;
@@ -618,7 +621,7 @@ async function cancelarConsultaPagaComCreditoLivre(consultaId, pacienteId, motiv
         UPDATE dbo.Consultas
           SET Status = N'Cancelada',
               StatusPagamento = N'CreditoPaciente',
-              DataEncerramento = COALESCE(DataEncerramento, SYSDATETIME()),
+              DataEncerramento = COALESCE(DataEncerramento, @AgoraBrasil),
               MotivoEncerramento = COALESCE(NULLIF(@Motivo, N''), MotivoEncerramento, N'Cancelamento solicitado pelo paciente'),
               ChatLiberado = 0,
               ChatLiberadoEm = NULL
@@ -812,6 +815,12 @@ function formatSqlLocalDateTime(value) {
   const parts = extractSqlLocalDateTimeParts(value);
   if (!parts) return null;
   return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}T${pad2(parts.hour)}:${pad2(parts.minute)}:${pad2(parts.second)}.${pad3(parts.millisecond)}`;
+}
+
+function formatSqlLocalDateTimePtBr(value) {
+  const parts = extractSqlLocalDateTimeParts(value);
+  if (!parts) return 'data/hora inválida';
+  return `${pad2(parts.day)}/${pad2(parts.month)}/${parts.year}, ${pad2(parts.hour)}:${pad2(parts.minute)}`;
 }
 
 function formatSqlDateBR(value) {
@@ -1023,31 +1032,8 @@ function gerarTermoConsentimentoPdfBuffer(dados) {
 }
 
 function getNowInAppTimeZoneParts() {
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: APP_TIME_ZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  });
-
-  const parts = formatter.formatToParts(new Date());
-  const read = (type) => Number(parts.find((item) => item.type === type)?.value ?? '0');
-
-  return {
-    year: read('year'),
-    month: read('month'),
-    day: read('day'),
-    hour: read('hour'),
-    minute: read('minute'),
-    second: read('second'),
-    millisecond: 0,
-  };
+  return getAppTimeZoneParts();
 }
-
 function getTokenExpirationParts(row) {
   if (!row) return null;
 
@@ -2586,6 +2572,7 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
       req.input('UserAgentAceite', sql.NVarChar(800), userAgentAceite);
       req.input('OrigemAceite', sql.NVarChar(80), origemAceite);
       req.input('EspecialidadeId', sql.Int, especialidadeId);
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       BEGIN TRY
         DECLARE @ConsultaCriada TABLE (
@@ -2661,7 +2648,7 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
           BEGIN
             UPDATE dbo.AceitesDocumentosLegais
             SET
-              AceitoEm = GETDATE(),
+              AceitoEm = @AgoraBrasil,
               Ip = @Ip,
               UserAgent = @UserAgent,
               Origem = @Origem
@@ -2675,20 +2662,21 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
             INSERT INTO dbo.AceitesDocumentosLegais
               (DocumentoLegalId, UsuarioTipo, UsuarioId, ConsultaId, AceitoEm, Ip, UserAgent, Origem)
             VALUES
-              (@DocumentoLegalId, @UsuarioTipo, @UsuarioId, @ConsultaId, GETDATE(), @Ip, @UserAgent, @Origem);
+              (@DocumentoLegalId, @UsuarioTipo, @UsuarioId, @ConsultaId, @AgoraBrasil, @Ip, @UserAgent, @Origem);
           END
         ';
 
         EXEC sp_executesql
           @SqlAceite,
-          N'@DocumentoLegalId INT, @UsuarioTipo NVARCHAR(80), @UsuarioId INT, @ConsultaId INT, @Ip NVARCHAR(120), @UserAgent NVARCHAR(800), @Origem NVARCHAR(80)',
+          N'@DocumentoLegalId INT, @UsuarioTipo NVARCHAR(80), @UsuarioId INT, @ConsultaId INT, @Ip NVARCHAR(120), @UserAgent NVARCHAR(800), @Origem NVARCHAR(80), @AgoraBrasil DATETIME2(7)',
           @DocumentoLegalId = @DocumentoLegalIdAtual,
           @UsuarioTipo = N'Paciente',
           @UsuarioId = @PacienteId,
           @ConsultaId = @ConsultaId,
           @Ip = @IpAceite,
           @UserAgent = @UserAgentAceite,
-          @Origem = @OrigemAceite;
+          @Origem = @OrigemAceite,
+          @AgoraBrasil = @AgoraBrasil;
 
         IF @Metodo = N'Credito'
         BEGIN
@@ -2871,12 +2859,13 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
         req.input('PacienteId', sql.Int, Number(usuario.id));
         req.input('Status', sql.NVarChar(60), STATUS.CANCELADA);
         req.input('Motivo', sql.NVarChar(400), motivo);
+        req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
       },
       `
         UPDATE dbo.Consultas
         SET Status = @Status,
             MotivoEncerramento = COALESCE(@Motivo, MotivoEncerramento),
-            DataEncerramento = COALESCE(DataEncerramento, SYSDATETIME()),
+            DataEncerramento = COALESCE(DataEncerramento, @AgoraBrasil),
             ChatLiberado = 0
         WHERE Id = @Id
           AND PacienteId = @PacienteId;
@@ -2966,13 +2955,14 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
         req.input('FisioterapeutaId', sql.Int, fisioId);
         req.input('StatusNovo', sql.NVarChar(60), 'Fisioterapeuta Ausente');
         req.input('Motivo', sql.NVarChar(400), motivo);
+        req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
       },
       `
         -- Marca como "falha do fisio" para habilitar o fluxo já existente de decisão do paciente
         UPDATE dbo.Consultas
         SET
           Status = @StatusNovo,
-          DataEncerramento = COALESCE(DataEncerramento, SYSDATETIME()),
+          DataEncerramento = COALESCE(DataEncerramento, @AgoraBrasil),
           MotivoEncerramento = COALESCE(
             NULLIF(@Motivo, N''),
             MotivoEncerramento,
@@ -3039,12 +3029,13 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
       req.input('Id', sql.Int, id);
       req.input('Status', sql.NVarChar(60), STATUS.CANCELADA);
       req.input('Motivo', sql.NVarChar(400), motivo);
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     },
     `
       UPDATE dbo.Consultas
       SET Status = @Status,
           MotivoEncerramento = COALESCE(@Motivo, MotivoEncerramento),
-          DataEncerramento = COALESCE(DataEncerramento, SYSDATETIME()),
+          DataEncerramento = COALESCE(DataEncerramento, @AgoraBrasil),
           ChatLiberado = 0
       WHERE Id = @Id;
     `
@@ -3107,19 +3098,19 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
     );
   }
 
-  const dataHoraConsulta = new Date(existente?.DataHora ?? 0);
-  if (Number.isNaN(dataHoraConsulta.getTime())) {
+  const dataHoraConsultaParts = extractSqlLocalDateTimeParts(existente?.DataHora ?? null);
+  if (!dataHoraConsultaParts) {
     throw new HttpError(400, 'Consulta sem DataHora válida para liberar o check-in.');
   }
 
   const liberaCheckinEm = new Date(
-    dataHoraConsulta.getTime() - CHECKIN_ANTECEDENCIA_MIN * 60 * 1000
+    localDateTimePartsToNaiveTimestamp(dataHoraConsultaParts) - CHECKIN_ANTECEDENCIA_MIN * 60 * 1000
   );
 
-  if (Date.now() < liberaCheckinEm.getTime()) {
+  if (localDateTimePartsToNaiveTimestamp(getNowInAppTimeZoneParts()) < liberaCheckinEm.getTime()) {
     throw new HttpError(
       409,
-      `Check-in só é liberado a partir de ${formatDateTimePtBr(liberaCheckinEm)} (${CHECKIN_ANTECEDENCIA_MIN} min antes da consulta).`
+      `Check-in só é liberado a partir de ${formatSqlLocalDateTimePtBr(liberaCheckinEm)} (${CHECKIN_ANTECEDENCIA_MIN} min antes da consulta).`
     );
   }
 
@@ -3133,12 +3124,13 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
     req.input('CheckinLatitude', sql.Decimal(9, 6), lat);
     req.input('CheckinLongitude', sql.Decimal(9, 6), lon);
     req.input('EvidenciaCheckin', sql.NVarChar(1000), evidencia);
+    req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
   }, `
     UPDATE dbo.Consultas
     SET CheckinLatitude = COALESCE(@CheckinLatitude, CheckinLatitude),
         CheckinLongitude = COALESCE(@CheckinLongitude, CheckinLongitude),
-        CheckinHora = COALESCE(CheckinHora, SYSDATETIME()),
-        DataCheckin = COALESCE(DataCheckin, SYSDATETIME()),
+        CheckinHora = COALESCE(CheckinHora, @AgoraBrasil),
+        DataCheckin = COALESCE(DataCheckin, @AgoraBrasil),
         EvidenciaCheckin = COALESCE(@EvidenciaCheckin, EvidenciaCheckin)
     WHERE Id = @Id;
   `);
@@ -4077,6 +4069,7 @@ async decidirNoShowFisio(id, body, usuario) {
       req.input('ConsultaId', sql.Int, consultaId);
       req.input('PacienteId', sql.Int, Number(usuario.id));
       req.input('Motivo', sql.NVarChar(500), motivo);
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       SET NOCOUNT ON;
       SET XACT_ABORT ON;
@@ -4261,7 +4254,7 @@ async decidirNoShowFisio(id, body, usuario) {
                 )
                 BEGIN
                   INSERT INTO dbo.LogsFinanceiros (TransacaoId, RepasseId, Usuario, Acao, DataAcao, Observacao)
-                  VALUES (@TransacaoId, NULL, N'Sistema', N'Estorno', SYSDATETIME(), N'Transação status: Reembolsado');
+                  VALUES (@TransacaoId, NULL, N'Sistema', N'Estorno', @AgoraBrasil, N'Transação status: Reembolsado');
                 END
               END
             END
@@ -4361,7 +4354,7 @@ async decidirNoShowFisio(id, body, usuario) {
                 )
                 BEGIN
                   INSERT INTO dbo.LogsFinanceiros (TransacaoId, RepasseId, Usuario, Acao, DataAcao, Observacao)
-                  VALUES (@TransacaoId, NULL, N'Sistema', N'Estorno', SYSDATETIME(), N'Transação status: Reembolsado');
+                  VALUES (@TransacaoId, NULL, N'Sistema', N'Estorno', @AgoraBrasil, N'Transação status: Reembolsado');
                 END
               END
             END
@@ -4466,7 +4459,7 @@ async decidirNoShowFisio(id, body, usuario) {
             )
             BEGIN
               INSERT INTO dbo.LogsFinanceiros (TransacaoId, RepasseId, Usuario, Acao, DataAcao, Observacao)
-              VALUES (@TransacaoId, NULL, N'Sistema', N'Estorno', SYSDATETIME(), N'Transação status: Reembolsado');
+              VALUES (@TransacaoId, NULL, N'Sistema', N'Estorno', @AgoraBrasil, N'Transação status: Reembolsado');
             END
           END
         END

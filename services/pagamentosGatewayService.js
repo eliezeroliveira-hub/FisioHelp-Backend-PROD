@@ -7,6 +7,7 @@ import { ENV } from '../config/env.js';
 import { asaasClient } from './asaasClient.js';
 import notificacoesDispatch from './notificacoesDispatch.js';
 import { isValidCPF, isValidEmail } from '../utils/identityValidators.js';
+import { agoraBrasilDate, formatBrasilDateTimeLocalIso } from '../utils/appDateTime.js';
 
 const ASAAS_PACOTE_MAX_PARCELAS = 10;
 
@@ -593,13 +594,14 @@ const pagamentosGatewayService = {
       req.input('Codigo', sql.NVarChar(50), checkoutId);
       req.input('GatewayCheckoutId', sql.NVarChar(100), checkoutId);
       req.input('GatewayPaymentStatus', sql.NVarChar(60), gatewayText(checkout?.status, 60));
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       UPDATE dbo.Transacoes
       SET CodigoTransacao = @Codigo,
           GatewayProvider = N'asaas',
           GatewayCheckoutId = @GatewayCheckoutId,
           GatewayPaymentStatus = COALESCE(@GatewayPaymentStatus, GatewayPaymentStatus),
-          GatewayAtualizadoEm = SYSDATETIME()
+          GatewayAtualizadoEm = @AgoraBrasil
       WHERE Id = @Id
         AND Status = N'Pendente';
     `);
@@ -705,6 +707,7 @@ const pagamentosGatewayService = {
       req.input('PacoteId', sql.Int, idPacote);
       req.input('CheckoutId', sql.NVarChar(100), gatewayText(checkoutId, 100));
       req.input('GatewayStatus', sql.NVarChar(100), gatewayText(checkout?.status ?? 'ACTIVE', 100));
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       UPDATE dbo.Pacotes
       SET Gateway = N'asaas',
@@ -712,7 +715,7 @@ const pagamentosGatewayService = {
           GatewayStatus = COALESCE(@GatewayStatus, GatewayStatus),
           GatewayUltimoEvento = N'ASAAS_CHECKOUT_CREATED',
           GatewayErroMensagem = NULL,
-          GatewayAtualizadoEm = SYSDATETIME()
+          GatewayAtualizadoEm = @AgoraBrasil
       WHERE Id = @PacoteId
         AND LTRIM(RTRIM(ISNULL(Status, N''))) = N'PendentePagamento';
     `);
@@ -812,6 +815,7 @@ const pagamentosGatewayService = {
       req.input('PaymentId', sql.NVarChar(100), gatewayText(paymentId, 100));
       req.input('PaymentStatus', sql.NVarChar(60), gatewayText(paymentStatus, 60));
       req.input('Evento', sql.NVarChar(80), gatewayText(event, 80));
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       UPDATE dbo.Transacoes
       SET GatewayProvider = N'asaas',
@@ -819,7 +823,7 @@ const pagamentosGatewayService = {
           GatewayPaymentId = COALESCE(@PaymentId, GatewayPaymentId),
           GatewayPaymentStatus = COALESCE(@PaymentStatus, GatewayPaymentStatus),
           GatewayUltimoEvento = COALESCE(@Evento, GatewayUltimoEvento),
-          GatewayAtualizadoEm = SYSDATETIME()
+          GatewayAtualizadoEm = @AgoraBrasil
       WHERE Id = @TransacaoId;
 
       SELECT TOP (1)
@@ -847,6 +851,7 @@ const pagamentosGatewayService = {
       req.input('InstallmentId', sql.NVarChar(100), gatewayText(installmentId, 100));
       req.input('PaymentStatus', sql.NVarChar(100), gatewayText(paymentStatus, 100));
       req.input('Evento', sql.NVarChar(80), gatewayText(event, 80));
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       UPDATE dbo.Pacotes
       SET Gateway = N'asaas',
@@ -856,7 +861,7 @@ const pagamentosGatewayService = {
           GatewayStatus = COALESCE(@PaymentStatus, GatewayStatus),
           GatewayUltimoEvento = COALESCE(@Evento, GatewayUltimoEvento),
           GatewayErroMensagem = NULL,
-          GatewayAtualizadoEm = SYSDATETIME()
+          GatewayAtualizadoEm = @AgoraBrasil
       WHERE Id = @PacoteId;
 
       SELECT TOP (1)
@@ -963,6 +968,7 @@ const pagamentosGatewayService = {
     const result = await queryWithContext(ctx, (req) => {
       req.input('PacoteId', sql.Int, id);
       req.input('MetodoPagamento', sql.NVarChar(20), metodo);
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       SET NOCOUNT ON;
       SET XACT_ABORT ON;
@@ -1000,10 +1006,10 @@ const pagamentosGatewayService = {
               MetodoPagamento = @MetodoPagamento,
               GatewayStatus = N'Pago',
               ValorPago = COALESCE(ValorPago, @ValorTotal),
-              PagoEm = COALESCE(PagoEm, SYSDATETIME()),
+              PagoEm = COALESCE(PagoEm, @AgoraBrasil),
               GatewayUltimoEvento = N'ASAAS_PACKAGE_PAID',
               GatewayErroMensagem = NULL,
-              GatewayAtualizadoEm = SYSDATETIME()
+              GatewayAtualizadoEm = @AgoraBrasil
           WHERE Id = @PacoteId;
         END
         ELSE
@@ -1013,10 +1019,10 @@ const pagamentosGatewayService = {
               MetodoPagamento = COALESCE(MetodoPagamento, @MetodoPagamento),
               GatewayStatus = COALESCE(GatewayStatus, N'Pago'),
               ValorPago = COALESCE(ValorPago, @ValorTotal),
-              PagoEm = COALESCE(PagoEm, SYSDATETIME()),
+              PagoEm = COALESCE(PagoEm, @AgoraBrasil),
               GatewayUltimoEvento = N'ASAAS_PACKAGE_PAID_IDEMPOTENT',
               GatewayErroMensagem = NULL,
-              GatewayAtualizadoEm = SYSDATETIME()
+              GatewayAtualizadoEm = @AgoraBrasil
           WHERE Id = @PacoteId;
         END
 
@@ -1113,6 +1119,7 @@ const pagamentosGatewayService = {
       req.input('PacoteId', sql.Int, id);
       req.input('PacienteId', sql.Int, isPaciente ? Number(ctx.id) : null);
       req.input('Motivo', sql.NVarChar(500), gatewayText(motivo, 500));
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       DECLARE @Pacote TABLE (
         PacoteId INT,
@@ -1122,11 +1129,11 @@ const pagamentosGatewayService = {
 
       UPDATE dbo.Pacotes
       SET Status = N'Cancelado',
-          CanceladoEm = COALESCE(CanceladoEm, SYSDATETIME()),
+          CanceladoEm = COALESCE(CanceladoEm, @AgoraBrasil),
           GatewayStatus = N'Cancelado',
           GatewayUltimoEvento = N'CHECKOUT_ABANDONADO_APP',
           GatewayErroMensagem = @Motivo,
-          GatewayAtualizadoEm = SYSDATETIME()
+          GatewayAtualizadoEm = @AgoraBrasil
       OUTPUT inserted.Id, deleted.Status, CAST(1 AS bit)
       INTO @Pacote (PacoteId, StatusAnterior, PacoteCancelado)
       WHERE Id = @PacoteId
@@ -1254,6 +1261,7 @@ const pagamentosGatewayService = {
     const result = await queryWithContext(ctx, (req) => {
       req.input('PacoteId', sql.Int, id);
       req.input('PacienteId', sql.Int, ctx?.tipo === 'Paciente' ? Number(ctx.id) : null);
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       SELECT TOP (1)
         p.Id AS PacoteId,
@@ -1269,8 +1277,8 @@ const pagamentosGatewayService = {
         LTRIM(RTRIM(ISNULL(p.GatewayStatus, N''))) AS GatewayStatus,
         LTRIM(RTRIM(ISNULL(p.GatewayRefundStatus, N''))) AS GatewayRefundStatus,
         p.GatewayRefundValor,
-        CONVERT(VARCHAR(10), DATEADD(DAY, -1, COALESCE(p.PagoEm, p.CriadoEm, p.DataCompra, SYSDATETIME())), 23) AS GatewayBuscaDataInicio,
-        CONVERT(VARCHAR(10), DATEADD(DAY, 1, COALESCE(p.PagoEm, p.CriadoEm, p.DataCompra, SYSDATETIME())), 23) AS GatewayBuscaDataFim
+        CONVERT(VARCHAR(10), DATEADD(DAY, -1, COALESCE(p.PagoEm, p.CriadoEm, p.DataCompra, @AgoraBrasil)), 23) AS GatewayBuscaDataInicio,
+        CONVERT(VARCHAR(10), DATEADD(DAY, 1, COALESCE(p.PagoEm, p.CriadoEm, p.DataCompra, @AgoraBrasil)), 23) AS GatewayBuscaDataFim
       FROM dbo.Pacotes p
       WHERE p.Id = @PacoteId
         AND (@PacienteId IS NULL OR p.PacienteId = @PacienteId);
@@ -1368,6 +1376,7 @@ const pagamentosGatewayService = {
       req.input('ErroMensagem', sql.NVarChar(500), gatewayText(erroMensagem, 500));
       req.input('Solicitado', sql.Bit, solicitado ? 1 : 0);
       req.input('Confirmado', sql.Bit, confirmado ? 1 : 0);
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       UPDATE dbo.Pacotes
       SET Gateway = N'asaas',
@@ -1385,16 +1394,16 @@ const pagamentosGatewayService = {
           GatewayRefundDescricao = COALESCE(@RefundDescricao, GatewayRefundDescricao),
           GatewayRefundReceiptUrl = COALESCE(@RefundReceiptUrl, GatewayRefundReceiptUrl),
           GatewayRefundSolicitadoEm = CASE
-            WHEN @Solicitado = 1 THEN COALESCE(GatewayRefundSolicitadoEm, SYSDATETIME())
+            WHEN @Solicitado = 1 THEN COALESCE(GatewayRefundSolicitadoEm, @AgoraBrasil)
             ELSE GatewayRefundSolicitadoEm
           END,
           GatewayRefundConfirmadoEm = CASE
-            WHEN @Confirmado = 1 THEN COALESCE(GatewayRefundConfirmadoEm, SYSDATETIME())
+            WHEN @Confirmado = 1 THEN COALESCE(GatewayRefundConfirmadoEm, @AgoraBrasil)
             ELSE GatewayRefundConfirmadoEm
           END,
           GatewayUltimoEvento = COALESCE(@Evento, GatewayUltimoEvento),
           GatewayErroMensagem = @ErroMensagem,
-          GatewayAtualizadoEm = SYSDATETIME()
+          GatewayAtualizadoEm = @AgoraBrasil
       WHERE Id = @PacoteId;
 
       SELECT TOP (1)
@@ -1644,6 +1653,7 @@ const pagamentosGatewayService = {
       req.input('Solicitado', sql.Bit, solicitado ? 1 : 0);
       req.input('Confirmado', sql.Bit, confirmado ? 1 : 0);
       req.input('RestaurarConsultaCancelada', sql.Bit, restaurarConsultaCancelada ? 1 : 0);
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       SET NOCOUNT ON;
 
@@ -1657,16 +1667,16 @@ const pagamentosGatewayService = {
           GatewayRefundDescricao = COALESCE(@RefundDescricao, GatewayRefundDescricao),
           GatewayRefundReceiptUrl = COALESCE(@RefundReceiptUrl, GatewayRefundReceiptUrl),
           GatewayRefundSolicitadoEm = CASE
-            WHEN @Solicitado = 1 THEN COALESCE(GatewayRefundSolicitadoEm, SYSDATETIME())
+            WHEN @Solicitado = 1 THEN COALESCE(GatewayRefundSolicitadoEm, @AgoraBrasil)
             ELSE GatewayRefundSolicitadoEm
           END,
           GatewayRefundConfirmadoEm = CASE
-            WHEN @Confirmado = 1 THEN COALESCE(GatewayRefundConfirmadoEm, SYSDATETIME())
+            WHEN @Confirmado = 1 THEN COALESCE(GatewayRefundConfirmadoEm, @AgoraBrasil)
             ELSE GatewayRefundConfirmadoEm
           END,
           GatewayUltimoEvento = COALESCE(@Evento, GatewayUltimoEvento),
           GatewayErroMensagem = @ErroMensagem,
-          GatewayAtualizadoEm = SYSDATETIME()
+          GatewayAtualizadoEm = @AgoraBrasil
       WHERE Id = @TransacaoId;
 
       IF @RestaurarConsultaCancelada = 1
@@ -1684,7 +1694,7 @@ const pagamentosGatewayService = {
           AND LTRIM(RTRIM(ISNULL(t.Status, N''))) = N'Pago'
           AND LTRIM(RTRIM(ISNULL(c.Status, N''))) = N'Cancelada'
           AND LTRIM(RTRIM(ISNULL(c.StatusPagamento, N''))) = N'Pago'
-          AND c.DataHora > SYSDATETIME()
+          AND c.DataHora > @AgoraBrasil
           AND (
             c.MotivoEncerramento LIKE N'%reembolso Asaas%'
             OR c.MotivoEncerramento LIKE N'%reembolso%'
@@ -1706,7 +1716,7 @@ const pagamentosGatewayService = {
             cr.ConsultaId,
             N'ReembolsoNegado',
             LEFT(COALESCE(@ErroMensagem, N'Estorno negado pelo Asaas.'), 400),
-            SYSDATETIME(),
+            @AgoraBrasil,
             N'Admin',
             TRY_CONVERT(INT, SESSION_CONTEXT(N'UsuarioId'))
           FROM @ConsultasRestauradas cr;
@@ -1745,6 +1755,7 @@ const pagamentosGatewayService = {
       req.input('RefundDescricao', sql.NVarChar(500), gatewayText(refundInfo?.description, 500));
       req.input('RefundReceiptUrl', sql.NVarChar(500), gatewayText(refundInfo?.receiptUrl, 500));
       req.input('Evento', sql.NVarChar(80), gatewayText(event ?? 'PAYMENT_REFUNDED', 80));
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       SET NOCOUNT ON;
       SET XACT_ABORT ON;
@@ -1812,10 +1823,10 @@ const pagamentosGatewayService = {
             GatewayRefundValor = COALESCE(@RefundValor, GatewayRefundValor, ValorTotal),
             GatewayRefundDescricao = COALESCE(@RefundDescricao, GatewayRefundDescricao),
             GatewayRefundReceiptUrl = COALESCE(@RefundReceiptUrl, GatewayRefundReceiptUrl),
-            GatewayRefundConfirmadoEm = COALESCE(GatewayRefundConfirmadoEm, SYSDATETIME()),
+            GatewayRefundConfirmadoEm = COALESCE(GatewayRefundConfirmadoEm, @AgoraBrasil),
             GatewayUltimoEvento = COALESCE(@Evento, GatewayUltimoEvento),
             GatewayErroMensagem = NULL,
-            GatewayAtualizadoEm = SYSDATETIME()
+            GatewayAtualizadoEm = @AgoraBrasil
         WHERE Id = @TransacaoId
           AND LTRIM(RTRIM(ISNULL(Status, N''))) IN (N'Pago', N'Reembolsado');
 
@@ -1834,7 +1845,7 @@ const pagamentosGatewayService = {
           )
         BEGIN
           INSERT INTO dbo.LogsFinanceiros (TransacaoId, RepasseId, Usuario, Acao, DataAcao, Observacao)
-          VALUES (@TransacaoId, NULL, N'Sistema', N'Estorno', SYSDATETIME(), @Observacao);
+          VALUES (@TransacaoId, NULL, N'Sistema', N'Estorno', @AgoraBrasil, @Observacao);
         END
 
         COMMIT;
@@ -2035,6 +2046,7 @@ const pagamentosGatewayService = {
       req.input('TransacaoId', sql.Int, idTransacao);
       req.input('PacienteId', sql.Int, isPaciente ? Number(ctx.id) : null);
       req.input('Motivo', sql.NVarChar(400), motivo || 'Checkout fechado antes da confirmação do pagamento.');
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       SET NOCOUNT ON;
       SET XACT_ABORT ON;
@@ -2105,7 +2117,7 @@ const pagamentosGatewayService = {
           UPDATE dbo.Consultas
           SET Status = N'Cancelada',
               MotivoEncerramento = COALESCE(NULLIF(@Motivo, N''), MotivoEncerramento, N'Checkout fechado antes da confirmação do pagamento.'),
-              DataEncerramento = COALESCE(DataEncerramento, SYSDATETIME()),
+              DataEncerramento = COALESCE(DataEncerramento, @AgoraBrasil),
               ChatLiberado = 0
           WHERE Id = @ConsultaEfetiva
             AND PacienteId = @PacienteEfetivo
@@ -2172,7 +2184,7 @@ const pagamentosGatewayService = {
     const status = (statusSimulado ?? 'Pendente').toString();
 
     // Id "fake" para simular retorno do gateway (formato compatível com o que você já grava hoje)
-    const paymentId = `PKT_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+    const paymentId = `PKT_${agoraBrasilDate().getTime()}_${Math.floor(Math.random() * 1e6)}`;
 
     return {
       gateway: 'StandBy',
@@ -2211,7 +2223,7 @@ const pagamentosGatewayService = {
       pacoteId,
       pacienteId,
       motivo,
-      processedAt: new Date().toISOString(),
+      processedAt: formatBrasilDateTimeLocalIso(),
     };
   }
 };

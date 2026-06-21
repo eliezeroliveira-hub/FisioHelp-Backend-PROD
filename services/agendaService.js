@@ -2,6 +2,7 @@
 import { sql } from '../config/dbConfig.js';
 import { queryWithContext } from './_queryWithContext.js';
 import { HttpError } from '../utils/httpError.js';
+import { agoraBrasilDate, getAppTimeZoneParts } from '../utils/appDateTime.js';
 
 const NOTAS_MAX_LENGTH = 500;
 const MOTIVO_MAX_LENGTH = 500;
@@ -587,13 +588,14 @@ async function carregarSuporteDisponibilidadeDia(usuario, fisioterapeutaId, data
       req.input('FisioterapeutaId', sql.Int, fisioterapeutaId);
       req.input('DayStart', sql.DateTime, dayStart);
       req.input('DayEnd', sql.DateTime, dayEnd);
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
       bindConsultaStatusAtivo(req);
     }, `
       SELECT Id, DataHora
       FROM dbo.Consultas
       WHERE FisioterapeutaId = @FisioterapeutaId
         ${CONSULTA_STATUS_ATIVO_WHERE}
-        AND DataHora >= CASE WHEN @DayStart > SYSDATETIME() THEN @DayStart ELSE SYSDATETIME() END
+        AND DataHora >= CASE WHEN @DayStart > @AgoraBrasil THEN @DayStart ELSE @AgoraBrasil END
         AND DataHora <  @DayEnd
       ORDER BY DataHora ASC, Id ASC;
     `, { requireContext: true }),
@@ -872,13 +874,14 @@ async function assertSemConsultaFuturaNoSlot(usuario, fisioterapeutaId, diaSeman
     req.input('DiaSemana', sql.TinyInt, diaSemana);
     req.input('HoraInicio', sql.Time, horaInicio);
     req.input('HoraFim', sql.Time, horaFim);
+    req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     bindConsultaStatusAtivo(req);
   }, `
     SELECT TOP 1 Id
     FROM dbo.Consultas
     WHERE FisioterapeutaId = @FisioterapeutaId
       ${CONSULTA_STATUS_ATIVO_WHERE}
-      AND DataHora >= SYSDATETIME()
+      AND DataHora >= @AgoraBrasil
       AND ((DATEPART(WEEKDAY, DataHora) + @@DATEFIRST - 1) % 7) = @DiaSemana
       AND (
         CONVERT(time, DataHora) >= CONVERT(time, @HoraInicio)
@@ -946,6 +949,7 @@ const agendaService = {
         req.input('Notas', sql.NVarChar(NOTAS_MAX_LENGTH), nNotas);
         req.input('SobrescreverConflitos', sql.Bit, sobrescreverConflitos);
         req.input('SubstituirDia', sql.Bit, substituirDia);
+        req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
         bindConsultaStatusAtivo(req);
       }, `
         BEGIN TRY
@@ -988,7 +992,7 @@ const agendaService = {
               FROM dbo.Consultas WITH (UPDLOCK, HOLDLOCK)
               WHERE FisioterapeutaId = @FisioterapeutaId
                 ${CONSULTA_STATUS_ATIVO_WHERE}
-                AND DataHora >= SYSDATETIME()
+                AND DataHora >= @AgoraBrasil
                 AND ((DATEPART(WEEKDAY, DataHora) + @@DATEFIRST - 1) % 7) = @DiaSemana
                 AND EXISTS (
                   SELECT 1
@@ -1080,6 +1084,7 @@ const agendaService = {
         req.input('HoraFim', sql.Time, hf);
         req.input('Ativo', sql.Bit, isAtivo);
         req.input('Notas', sql.NVarChar(NOTAS_MAX_LENGTH), nNotas);
+        req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
         bindConsultaStatusAtivo(req);
       }, `
         BEGIN TRY
@@ -1114,7 +1119,7 @@ const agendaService = {
                FROM dbo.Consultas WITH (UPDLOCK, HOLDLOCK)
                WHERE FisioterapeutaId = @FisioterapeutaId
                  ${CONSULTA_STATUS_ATIVO_WHERE}
-                 AND DataHora >= SYSDATETIME()
+                 AND DataHora >= @AgoraBrasil
                  AND ((DATEPART(WEEKDAY, DataHora) + @@DATEFIRST - 1) % 7) = @DiaSemana
                  AND (
                    CONVERT(time, DataHora) >= CONVERT(time, @HoraInicio)
@@ -1188,6 +1193,7 @@ const agendaService = {
       const result = await queryWithContext(usuario, (req) => {
         req.input('Id', sql.Int, id);
         req.input('FisioterapeutaId', sql.Int, fisioterapeutaId);
+        req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
         bindConsultaStatusAtivo(req);
       }, `
         BEGIN TRY
@@ -1217,7 +1223,7 @@ const agendaService = {
                FROM dbo.Consultas WITH (UPDLOCK, HOLDLOCK)
                WHERE FisioterapeutaId = @FisioterapeutaId
                  ${CONSULTA_STATUS_ATIVO_WHERE}
-                 AND DataHora >= SYSDATETIME()
+                 AND DataHora >= @AgoraBrasil
                  AND ((DATEPART(WEEKDAY, DataHora) + @@DATEFIRST - 1) % 7) = @DiaSemana
                  AND (
                    CONVERT(time, DataHora) >= CONVERT(time, @HoraInicio)
@@ -1313,7 +1319,7 @@ const agendaService = {
     const fisioterapeutaId = assertId(usuario?.id, 'Usuário');
     const di = parseLocalIsoToUtcNaive(dataInicio, 'DataInicio');
     const df = parseLocalIsoToUtcNaive(dataFim, 'DataFim');
-    const now = new Date();
+    const now = agoraBrasilDate();
     const motivoSanitizado = sanitizeMotivo(motivo);
     const shouldOverwrite = parseOverwriteConflictsFlag(
       sobrescreverConflitos ?? SobrescreverConflitos ?? overwriteConflicts
@@ -1421,7 +1427,7 @@ const agendaService = {
 
     const di = dataInicio === undefined ? row.DataInicio : parseLocalIsoToUtcNaive(dataInicio, 'DataInicio');
     const df = dataFim === undefined ? row.DataFim : parseLocalIsoToUtcNaive(dataFim, 'DataFim');
-    const now = new Date();
+    const now = agoraBrasilDate();
     const motivoSanitizado = motivo === undefined ? (row.Motivo ?? null) : sanitizeMotivo(motivo);
 
     if (Number.isNaN(di.getTime()) || Number.isNaN(df.getTime())) {
@@ -1673,6 +1679,7 @@ const agendaService = {
       req.input('Data', sql.Date, data);
       req.input('DiaSemDisponibilidade', sql.Bit, diaSemDisponibilidade);
       req.input('Notas', sql.NVarChar(NOTAS_MAX_LENGTH), notas);
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
 
       intervalos.forEach((intervalo, index) => {
         req.input(`HoraInicio${index}`, sql.Time, assertTimeStr(intervalo.horaInicio, 'HoraInicio'));
@@ -1696,7 +1703,7 @@ const agendaService = {
           @Data,
           @DiaSemDisponibilidade,
           @Notas,
-          SYSDATETIME()
+          @AgoraBrasil
         );
 
         SET @ExcecaoId = SCOPE_IDENTITY();
@@ -1776,6 +1783,7 @@ ${intervalos.map((_, index) => `
       req.input('Data', sql.Date, data);
       req.input('DiaSemDisponibilidade', sql.Bit, diaSemDisponibilidade);
       req.input('Notas', sql.NVarChar(NOTAS_MAX_LENGTH), notas);
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
 
       intervalos.forEach((intervalo, index) => {
         req.input(`HoraInicio${index}`, sql.Time, assertTimeStr(intervalo.horaInicio, 'HoraInicio'));
@@ -1798,7 +1806,7 @@ ${intervalos.map((_, index) => `
         SET Data = @Data,
             DiaSemDisponibilidade = @DiaSemDisponibilidade,
             Notas = @Notas,
-            AtualizadoEm = SYSDATETIME()
+            AtualizadoEm = @AgoraBrasil
         WHERE Id = @Id
           AND FisioterapeutaId = @FisioterapeutaId;
 
@@ -1887,8 +1895,9 @@ ${intervalos.map((_, index) => `
 
   async obterAgendaPublica(usuario, fisioterapeutaIdParam, { de, ate } = {}) {
     const fisioterapeutaId = assertId(fisioterapeutaIdParam, 'FisioterapeutaId');
-    const deDate = parseOptionalDate(de, 'Parâmetro de') ?? new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-    const ateDate = parseOptionalDate(ate, 'Parâmetro ate') ?? new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1);
+    const { year, month } = getAppTimeZoneParts();
+    const deDate = parseOptionalDate(de, 'Parâmetro de') ?? new Date(Date.UTC(year, month - 1, 1));
+    const ateDate = parseOptionalDate(ate, 'Parâmetro ate') ?? new Date(Date.UTC(year, month, 1));
 
     const [rotinaResult, excecoes] = await Promise.all([
       queryWithContext(usuario, (req) => {

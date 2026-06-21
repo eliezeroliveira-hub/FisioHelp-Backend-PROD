@@ -12,6 +12,7 @@ import { sql } from '../config/dbConfig.js';
 import { queryWithContext } from './_queryWithContext.js';
 import notificacoesDispatch from './notificacoesDispatch.js';
 import { HttpError } from '../utils/httpError.js';
+import { agoraBrasilDate } from '../utils/appDateTime.js';
 
 function requireUser(usuario) {
   if (!usuario || !usuario.id || !usuario.tipo) {
@@ -92,7 +93,7 @@ async function moveFileSafe(src, dst) {
 function buildSafeFileName(originalName) {
   const ext = path.extname(originalName || '').slice(0, 12).toLowerCase();
   const token = crypto.randomBytes(12).toString('hex');
-  return `${Date.now()}_${token}${ext}`;
+  return `${agoraBrasilDate().getTime()}_${token}${ext}`;
 }
 
 function toUploadsRelative(relPath) {
@@ -475,7 +476,7 @@ const suporteService = {
       PagamentoViaPlataforma === true ||
       PagamentoViaPlataforma === 1 ||
       PagamentoViaPlataforma === '1';
-    const dataHoraMs = new Date(DataHora ?? 0).getTime();
+    const dataHoraMs = DataHora ? new Date(DataHora).getTime() : NaN;
     const janelaContestacaoLimiteMs = dataHoraMs + (30 * 24 * 60 * 60 * 1000);
 
     if (!['Concluída', 'Paciente Ausente'].includes(Status)) {
@@ -489,7 +490,7 @@ const suporteService = {
       throw new HttpError(400, 'Contestação não permitida: consulta sem data válida para validar a janela de 30 dias.');
     }
 
-    if (Date.now() > janelaContestacaoLimiteMs) {
+    if (agoraBrasilDate().getTime() > janelaContestacaoLimiteMs) {
       throw new HttpError(400, 'Contestação não permitida: janela de 30 dias para contestação expirada.');
     }
 
@@ -690,16 +691,17 @@ const suporteService = {
         req.input('StatusAtual', sql.NVarChar(60), statusAtual);
         req.input('Status', sql.NVarChar(60), statusFinal);
         req.input('Obs', sql.NVarChar(500), obs);
+        req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
       },
       `
         UPDATE dbo.FaleConoscoChamados
         SET
           Status = @Status,
           DataConclusao = CASE
-            WHEN @Status IN (N'Concluido', N'Cancelado') THEN COALESCE(DataConclusao, SYSDATETIME())
+            WHEN @Status IN (N'Concluido', N'Cancelado') THEN COALESCE(DataConclusao, @AgoraBrasil)
             ELSE NULL
           END,
-          UltimaAtualizacao = SYSDATETIME(),
+          UltimaAtualizacao = @AgoraBrasil,
           ObservacoesInternas = CASE
             WHEN @Obs IS NULL OR LTRIM(RTRIM(@Obs)) = N'' THEN ObservacoesInternas
             ELSE LEFT(

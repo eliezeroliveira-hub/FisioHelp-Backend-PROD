@@ -11,6 +11,7 @@ import PDFDocument from 'pdfkit';
 import { sql } from '../config/dbConfig.js';
 import { queryWithContext } from './_queryWithContext.js';
 import { formatCNPJ } from '../utils/identityValidators.js';
+import { agoraBrasilDate } from '../utils/appDateTime.js';
 
 function toInt(v) {
   const n = Number(v);
@@ -202,7 +203,7 @@ async function gerarPdfReciboAtendimento({
   const values = [
     String(reciboId ?? '-'),
     String(consultaId ?? '-'),
-    formatDateTimeBR(dataGeracao || new Date()),
+    formatDateTimeBR(dataGeracao || agoraBrasilDate()),
     statusPagamento || '-'
   ];
 
@@ -342,7 +343,7 @@ async function gerarPdfReciboReembolso(detalhe) {
   const values = [
     String(detalhe?.Id ?? '-'),
     tipoReciboLabel(tipo),
-    formatDateTimeBR(detalhe?.DataGeracao || new Date()),
+    formatDateTimeBR(detalhe?.DataGeracao || agoraBrasilDate()),
     'Reembolsado'
   ];
 
@@ -393,7 +394,7 @@ async function gerarPdfReciboReembolso(detalhe) {
     detalhe?.DataEvento ||
     detalhe?.GatewayRefundConfirmadoEm ||
     detalhe?.DataGeracao ||
-    new Date();
+    agoraBrasilDate();
 
   sectionTitle('Dados do Reembolso');
   fieldRow('Paciente', detalhe?.PacienteNome || '-');
@@ -523,7 +524,11 @@ async function garantirRecibosParaConsultasConcluidas(usuario, pacienteId) {
   // Cria registros em dbo.Recibos para consultas concluídas (após janela) (se não existir)
   const inserted = await queryWithContext(
     usuario,
-    (req) => req.input('PacienteId', sql.Int, pacienteId).input('Horas', sql.Int, horas),
+    (req) =>
+      req
+        .input('PacienteId', sql.Int, pacienteId)
+        .input('Horas', sql.Int, horas)
+        .input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate()),
     `
     DECLARE @Novos TABLE (ReciboId INT, ConsultaId INT);
 
@@ -534,7 +539,7 @@ async function garantirRecibosParaConsultasConcluidas(usuario, pacienteId) {
         AND LTRIM(RTRIM(ISNULL(c.Status, N''))) = N'Concluída'
         AND ISNULL(c.ConfirmacaoAtendimento, 0) = 1
         AND c.DataEncerramento IS NOT NULL
-        AND DATEADD(HOUR, @Horas, c.DataEncerramento) <= SYSDATETIME()
+        AND DATEADD(HOUR, @Horas, c.DataEncerramento) <= @AgoraBrasil
         AND c.DataContestacao IS NULL
     )
     INSERT INTO dbo.Recibos
@@ -566,7 +571,10 @@ async function garantirRecibosParaConsultasConcluidas(usuario, pacienteId) {
 async function garantirRecibosParaReembolsosGateway(usuario, pacienteId) {
   const inserted = await queryWithContext(
     usuario,
-    (req) => req.input('PacienteId', sql.Int, pacienteId),
+    (req) =>
+      req
+        .input('PacienteId', sql.Int, pacienteId)
+        .input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate()),
     `
     DECLARE @Novos TABLE (ReciboId INT NOT NULL);
 
@@ -578,7 +586,7 @@ async function garantirRecibosParaReembolsosGateway(usuario, pacienteId) {
       N'ReembolsoConsulta',
       t.Id,
       COALESCE(t.GatewayRefundValor, t.ValorTotal),
-      COALESCE(t.GatewayRefundConfirmadoEm, t.GatewayAtualizadoEm, t.DataConfirmacao, SYSDATETIME()),
+      COALESCE(t.GatewayRefundConfirmadoEm, t.GatewayAtualizadoEm, t.DataConfirmacao, @AgoraBrasil),
       COALESCE(t.GatewayRefundDescricao, N'Reembolso de consulta.'),
       COALESCE(t.GatewayRefundId, t.GatewayPaymentId, t.CodigoTransacao, CONCAT(N'TRANSACAO_', t.Id))
     FROM dbo.Transacoes t
@@ -601,7 +609,7 @@ async function garantirRecibosParaReembolsosGateway(usuario, pacienteId) {
       N'ReembolsoPacote',
       p.Id,
       COALESCE(p.GatewayRefundValor, p.ValorPago, p.ValorTotal),
-      COALESCE(p.GatewayRefundConfirmadoEm, p.GatewayAtualizadoEm, p.CanceladoEm, SYSDATETIME()),
+      COALESCE(p.GatewayRefundConfirmadoEm, p.GatewayAtualizadoEm, p.CanceladoEm, @AgoraBrasil),
       COALESCE(p.GatewayRefundDescricao, N'Reembolso de pacote.'),
       COALESCE(p.GatewayRefundId, p.GatewayPaymentId, p.GatewayCheckoutId, CONCAT(N'PACOTE_', p.Id))
     FROM dbo.Pacotes p
@@ -647,7 +655,7 @@ async function gerarPdfSeNecessarioSemMutex(usuario, pacienteId, reciboId) {
         valorConsulta: detalhe.ValorConsulta,
         origemPagamento: detalhe.OrigemPagamento,
         statusPagamento: detalhe.StatusPagamento,
-        dataGeracao: detalhe.DataGeracao || new Date()
+        dataGeracao: detalhe.DataGeracao || agoraBrasilDate()
       });
 
   // Grava caminho relativo no banco (somente "recibos/<arquivo>.pdf")
@@ -657,11 +665,12 @@ async function gerarPdfSeNecessarioSemMutex(usuario, pacienteId, reciboId) {
       req
         .input('PacienteId', sql.Int, pacienteId)
         .input('ReciboId', sql.Int, reciboId)
-        .input('CaminhoArquivo', sql.NVarChar(510), relPath),
+        .input('CaminhoArquivo', sql.NVarChar(510), relPath)
+        .input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate()),
     `
     UPDATE dbo.Recibos
       SET CaminhoArquivo = @CaminhoArquivo,
-          DataGeracao = ISNULL(DataGeracao, SYSDATETIME())
+          DataGeracao = ISNULL(DataGeracao, @AgoraBrasil)
     WHERE Id = @ReciboId AND PacienteId = @PacienteId;
     `
   );

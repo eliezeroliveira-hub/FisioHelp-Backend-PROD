@@ -7,6 +7,7 @@ import notificacoesDispatch from './notificacoesDispatch.js';
 import reembolsosGatewayFilaService from './reembolsosGatewayFilaService.js';
 import { HttpError } from '../utils/httpError.js';
 import { log } from '../config/logger.js';
+import { agoraBrasilDate } from '../utils/appDateTime.js';
 
 // ---------------- helpers ----------------
 function assertId(v, name = 'id') {
@@ -277,6 +278,7 @@ async function marcarPacoteAtivo(pacoteId, usuario, extras = {}) {
       req.input('GatewayPaymentId', sql.NVarChar(120), gatewayPaymentId);
       req.input('GatewayStatus', sql.NVarChar(120), gatewayStatusRaw);
       req.input('ValorPago', sql.Decimal(10, 2), valorPago);
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     },
     `
       UPDATE dbo.Pacotes
@@ -286,7 +288,7 @@ async function marcarPacoteAtivo(pacoteId, usuario, extras = {}) {
         GatewayPaymentId = COALESCE(@GatewayPaymentId, GatewayPaymentId),
         GatewayStatus = COALESCE(@GatewayStatus, GatewayStatus),
         ValorPago = COALESCE(@ValorPago, ValorPago),
-        PagoEm = COALESCE(PagoEm, SYSDATETIME())
+        PagoEm = COALESCE(PagoEm, @AgoraBrasil)
       WHERE Id = @PacoteId;
     `
   );
@@ -321,6 +323,7 @@ async function marcarPacoteCancelado(pacoteId, usuario, extras = {}) {
       req.input('Gateway', sql.NVarChar(50), gateway);
       req.input('GatewayPaymentId', sql.NVarChar(120), gatewayPaymentId);
       req.input('GatewayStatus', sql.NVarChar(120), gatewayStatusRaw);
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     },
     `
       UPDATE dbo.Pacotes
@@ -329,7 +332,7 @@ async function marcarPacoteCancelado(pacoteId, usuario, extras = {}) {
         Gateway = COALESCE(@Gateway, Gateway),
         GatewayPaymentId = COALESCE(@GatewayPaymentId, GatewayPaymentId),
         GatewayStatus = COALESCE(@GatewayStatus, GatewayStatus),
-        CanceladoEm = COALESCE(CanceladoEm, SYSDATETIME())
+        CanceladoEm = COALESCE(CanceladoEm, @AgoraBrasil)
       WHERE Id = @PacoteId;
     `
   );
@@ -406,11 +409,11 @@ function round2(n) {
 }
 
 function diffDays(dateA, dateB) {
-  // floor difference in days ignoring time-of-day, using local time parts
+  // SQL datetime2 chega ao JS como wall-clock em UTC fake; compare os dias usando UTC parts.
   if (!(dateA instanceof Date) || isNaN(dateA.getTime())) return null;
   if (!(dateB instanceof Date) || isNaN(dateB.getTime())) return null;
-  const a = new Date(dateA.getFullYear(), dateA.getMonth(), dateA.getDate());
-  const b = new Date(dateB.getFullYear(), dateB.getMonth(), dateB.getDate());
+  const a = Date.UTC(dateA.getUTCFullYear(), dateA.getUTCMonth(), dateA.getUTCDate());
+  const b = Date.UTC(dateB.getUTCFullYear(), dateB.getUTCMonth(), dateB.getUTCDate());
   return Math.floor((b - a) / (24 * 60 * 60 * 1000));
 }
 
@@ -494,7 +497,7 @@ async function buscarConsultasEmAndamentoPacote(pacoteId, usuario) {
 }
 
 async function calcularCancelamentoPacote(pacote, usuario) {
-  const now = new Date();
+  const now = agoraBrasilDate();
 
   const qtd = Number(pacote?.QuantidadeConsultas ?? 0) || 0;
   const utilizadas = Number(pacote?.ConsultasUtilizadas ?? 0) || 0;
@@ -620,6 +623,7 @@ const pacotesService = {
 
     const resumoResult = await queryWithContext(usuario, (req) => {
       req.input('ValorTotal', sql.Decimal(18, 2), valorTotal);
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       SELECT TOP (1)
         CAST(ISNULL(decv.ValorBase, 0) AS DECIMAL(10,2)) AS ValorPacote,
@@ -640,7 +644,7 @@ const pacotesService = {
         @ValorTotal,
         N'Pacote',
         1,
-        CAST(SYSDATETIME() AS DATE),
+        CAST(@AgoraBrasil AS DATE),
         0,
         0,
         NULL,
@@ -746,6 +750,7 @@ const pacotesService = {
         req.input('GatewayPaymentId', sql.NVarChar(120), null);
         req.input('GatewayStatus', sql.NVarChar(120), 'Pendente');
         req.input('ValorPago', sql.Decimal(10, 2), null);
+        req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
 
       },
       `
@@ -754,7 +759,7 @@ const pacotesService = {
            Gateway, GatewayPaymentId, GatewayStatus, ValorPago, CriadoEm, PagoEm, CanceladoEm)
         VALUES
           (@PacienteId, @FisioterapeutaId, @EspecialidadeId, @Nome, @QuantidadeConsultas, 0, @ValorTotal, @ValorUnitarioAvulso, NULL, @Status,
-           @Gateway, @GatewayPaymentId, @GatewayStatus, @ValorPago, SYSDATETIME(), NULL, NULL);
+           @Gateway, @GatewayPaymentId, @GatewayStatus, @ValorPago, @AgoraBrasil, NULL, NULL);
 
         SELECT SCOPE_IDENTITY() AS PacoteId;
       `
@@ -1050,6 +1055,7 @@ const pacotesService = {
         : null;
       req.input('MotivoCreditoCarteira', sql.NVarChar(600), motivoCredito);
       req.input('CriarCreditoCarteira', sql.Bit, opcaoReembolso === 'Credito' && valorDevolver > 0 ? 1 : 0);
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       SET NOCOUNT ON;
       SET XACT_ABORT ON;
@@ -1076,14 +1082,14 @@ const pacotesService = {
           INSERT INTO dbo.CreditosPacientes
             (PacienteId, ConsultaId, Valor, Status, CriadoEm, UsadoEm, Motivo, PacoteId, OrigemPacoteId)
           VALUES
-            (@PacienteId, NULL, @ValorCreditoCarteira, N'Disponivel', SYSDATETIME(), NULL, @MotivoCreditoCarteira, NULL, @PacoteId);
+            (@PacienteId, NULL, @ValorCreditoCarteira, N'Disponivel', @AgoraBrasil, NULL, @MotivoCreditoCarteira, NULL, @PacoteId);
         END
 
         -- 3) Marca pacote como cancelado
         UPDATE dbo.Pacotes
         SET
           Status = N'Cancelado',
-          CanceladoEm = SYSDATETIME(),
+          CanceladoEm = @AgoraBrasil,
           GatewayStatus = @GatewayStatusCancelamento
         WHERE Id = @PacoteId;
 

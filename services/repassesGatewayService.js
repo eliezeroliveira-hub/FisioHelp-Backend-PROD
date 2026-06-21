@@ -5,6 +5,7 @@ import { queryWithContext } from './_queryWithContext.js';
 import { asaasClient } from './asaasClient.js';
 import notificacoesDispatch from './notificacoesDispatch.js';
 import { isCNPJAlfanumerico, isValidCNPJ, normalizeCNPJ } from '../utils/identityValidators.js';
+import { agoraBrasilDate } from '../utils/appDateTime.js';
 
 const STATUS_LOTE_ATIVO = ['Processando', 'EnviadoGateway', 'AguardandoConfirmacao'];
 const STATUS_TRANSFER_DONE = new Set(['DONE']);
@@ -249,6 +250,7 @@ const repassesGatewayService = {
 
     const result = await queryWithContext(ctx, (req) => {
       req.input('StaleMinutes', sql.Int, minutes);
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       SET NOCOUNT ON;
 
@@ -258,18 +260,18 @@ const repassesGatewayService = {
       SET Status = N'FalhaTemporaria',
           AtivoGateway = 0,
           ProcessandoEm = NULL,
-          ProximaTentativaEm = SYSDATETIME(),
+          ProximaTentativaEm = @AgoraBrasil,
           GatewayErroMensagem = N'Worker interrompido ou processamento excedeu o tempo limite.',
           GatewayUltimoEvento = N'FISIOHELP_TRANSFER_WORKER_STALE',
-          AtualizadoEm = SYSDATETIME()
+          AtualizadoEm = @AgoraBrasil
       OUTPUT INSERTED.Id INTO @Recuperados (Id)
       WHERE Status = N'Processando'
-        AND ProcessandoEm < DATEADD(MINUTE, -@StaleMinutes, SYSDATETIME());
+        AND ProcessandoEm < DATEADD(MINUTE, -@StaleMinutes, @AgoraBrasil);
 
       UPDATE i
       SET StatusItem = N'Falha',
           AtivoGatewayItem = 0,
-          AtualizadoEm = SYSDATETIME()
+          AtualizadoEm = @AgoraBrasil
       FROM dbo.LoteRepassesGatewayItens i
       JOIN @Recuperados r ON r.Id = i.LoteId
       WHERE i.StatusItem = N'Reservado';
@@ -277,7 +279,7 @@ const repassesGatewayService = {
       UPDATE a
       SET StatusAjuste = N'Falha',
           AtivoGatewayAjuste = 0,
-          AtualizadoEm = SYSDATETIME()
+          AtualizadoEm = @AgoraBrasil
       FROM dbo.LoteRepassesGatewayAjustes a
       JOIN @Recuperados r ON r.Id = a.LoteId
       WHERE a.StatusAjuste = N'Reservado';
@@ -294,6 +296,7 @@ const repassesGatewayService = {
       req.input('LimitRepasses', sql.Int, Math.max(1, Math.min(Number(limitRepasses) || 50, 200)));
       req.input('MaxAttempts', sql.Int, Math.max(1, Math.min(Number(maxAttempts) || 8, 50)));
       req.input('UsuarioRegistro', sql.NVarChar(200), text(`${ctx.tipo}:${ctx.id}`, 200));
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       SET NOCOUNT ON;
       SET XACT_ABORT ON;
@@ -344,7 +347,7 @@ const repassesGatewayService = {
         FROM dbo.LotesRepassesGateway l WITH (UPDLOCK, HOLDLOCK)
         WHERE l.Status = N'FalhaTemporaria'
           AND l.Tentativas < @MaxAttempts
-          AND (l.ProximaTentativaEm IS NULL OR l.ProximaTentativaEm <= SYSDATETIME())
+          AND (l.ProximaTentativaEm IS NULL OR l.ProximaTentativaEm <= @AgoraBrasil)
           AND NOT EXISTS (
             SELECT 1
             FROM dbo.LotesRepassesGateway ativo WITH (UPDLOCK, HOLDLOCK)
@@ -359,24 +362,24 @@ const repassesGatewayService = {
           UPDATE dbo.LotesRepassesGateway
           SET Status = N'Processando',
               AtivoGateway = 1,
-              ProcessandoEm = SYSDATETIME(),
+              ProcessandoEm = @AgoraBrasil,
               Tentativas = CASE WHEN Tentativas < 255 THEN Tentativas + 1 ELSE Tentativas END,
               GatewayErroMensagem = NULL,
               GatewayUltimoEvento = N'FISIOHELP_TRANSFER_RETRY',
-              AtualizadoEm = SYSDATETIME()
+              AtualizadoEm = @AgoraBrasil
           WHERE Id = @LoteId;
 
           UPDATE dbo.LoteRepassesGatewayItens
           SET StatusItem = N'Reservado',
               AtivoGatewayItem = 1,
-              AtualizadoEm = SYSDATETIME()
+              AtualizadoEm = @AgoraBrasil
           WHERE LoteId = @LoteId
             AND StatusItem = N'Falha';
 
           UPDATE dbo.LoteRepassesGatewayAjustes
           SET StatusAjuste = N'Reservado',
               AtivoGatewayAjuste = 1,
-              AtualizadoEm = SYSDATETIME()
+              AtualizadoEm = @AgoraBrasil
           WHERE LoteId = @LoteId
             AND StatusAjuste = N'Falha';
         END
@@ -398,7 +401,7 @@ const repassesGatewayService = {
             JOIN dbo.Fisioterapeutas f WITH (UPDLOCK, HOLDLOCK)
               ON f.Id = r.FisioterapeutaId
             WHERE LTRIM(RTRIM(ISNULL(r.Status, N''))) = N'Pendente'
-              AND r.DataPrevista <= SYSDATETIME()
+              AND r.DataPrevista <= @AgoraBrasil
               AND r.ValorLiquido > 0
               AND (
                 (
@@ -512,7 +515,7 @@ const repassesGatewayService = {
               JOIN dbo.Fisioterapeutas f WITH (READCOMMITTEDLOCK)
                 ON f.Id = r.FisioterapeutaId
               WHERE LTRIM(RTRIM(ISNULL(r.Status, N''))) = N'Pendente'
-                AND r.DataPrevista <= SYSDATETIME()
+                AND r.DataPrevista <= @AgoraBrasil
                 AND r.ValorLiquido > 0
                 AND (
                   (
@@ -617,7 +620,7 @@ const repassesGatewayService = {
             INSERT INTO dbo.LotesRepassesGateway
               (FisioterapeutaId, Status, AtivoGateway, GatewayProvider, Tentativas, ProcessandoEm, ProximaTentativaEm, UsuarioRegistro)
             VALUES
-              (@FisioId, N'Processando', 1, N'asaas', 1, SYSDATETIME(), SYSDATETIME(), @UsuarioRegistro);
+              (@FisioId, N'Processando', 1, N'asaas', 1, @AgoraBrasil, @AgoraBrasil, @UsuarioRegistro);
 
             SET @LoteId = CONVERT(INT, SCOPE_IDENTITY());
 
@@ -630,7 +633,7 @@ const repassesGatewayService = {
               FROM dbo.Repasses r WITH (UPDLOCK, HOLDLOCK)
               WHERE r.FisioterapeutaId = @FisioId
                 AND LTRIM(RTRIM(ISNULL(r.Status, N''))) = N'Pendente'
-                AND r.DataPrevista <= SYSDATETIME()
+                AND r.DataPrevista <= @AgoraBrasil
                 AND r.ValorLiquido > 0
                 AND NOT EXISTS (
                   SELECT 1
@@ -659,7 +662,7 @@ const repassesGatewayService = {
               SET Status = N'Cancelado',
                   AtivoGateway = 0,
                   GatewayErroMensagem = N'Nenhum repasse elegível encontrado após claim.',
-                  AtualizadoEm = SYSDATETIME()
+                  AtualizadoEm = @AgoraBrasil
               WHERE Id = @LoteId;
 
               SET @LoteId = NULL;
@@ -746,7 +749,7 @@ const repassesGatewayService = {
               UPDATE i
               SET ValorAjusteAplicado = c.ValorAjusteAplicado,
                   ValorTransferidoItem = CAST(i.ValorRepasse - c.ValorAjusteAplicado AS DECIMAL(10,2)),
-                  AtualizadoEm = SYSDATETIME()
+                  AtualizadoEm = @AgoraBrasil
               FROM dbo.LoteRepassesGatewayItens i
               JOIN ItensCalculados c ON c.Id = i.Id;
 
@@ -764,7 +767,7 @@ const repassesGatewayService = {
                     WHEN @ValorDisponivel <= 0 THEN 0
                     ELSE @ValorDisponivel - @ValorTarifaTransferencia
                   END AS DECIMAL(10,2)),
-                  AtualizadoEm = SYSDATETIME()
+                  AtualizadoEm = @AgoraBrasil
               WHERE Id = @LoteId;
             END
           END
@@ -852,6 +855,7 @@ const repassesGatewayService = {
       req.input('ReceiptUrl', sql.NVarChar(500), receiptUrl);
       req.input('TransferFee', sql.Decimal(10, 2), transferFee);
       req.input('StatusLote', sql.NVarChar(30), statusLote);
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       SET NOCOUNT ON;
 
@@ -863,23 +867,23 @@ const repassesGatewayService = {
           GatewayReceiptUrl = COALESCE(@ReceiptUrl, GatewayReceiptUrl),
           GatewayTransferFee = COALESCE(@TransferFee, GatewayTransferFee),
           GatewayUltimoEvento = N'FISIOHELP_TRANSFER_REQUESTED',
-          EnviadoEm = COALESCE(EnviadoEm, SYSDATETIME()),
+          EnviadoEm = COALESCE(EnviadoEm, @AgoraBrasil),
           ProcessandoEm = NULL,
           GatewayErroMensagem = NULL,
-          AtualizadoEm = SYSDATETIME()
+          AtualizadoEm = @AgoraBrasil
       WHERE Id = @LoteId;
 
       UPDATE dbo.LoteRepassesGatewayItens
       SET StatusItem = N'EnviadoGateway',
           AtivoGatewayItem = 1,
-          AtualizadoEm = SYSDATETIME()
+          AtualizadoEm = @AgoraBrasil
       WHERE LoteId = @LoteId
         AND StatusItem = N'Reservado';
 
       UPDATE dbo.LoteRepassesGatewayAjustes
       SET StatusAjuste = N'EnviadoGateway',
           AtivoGatewayAjuste = 1,
-          AtualizadoEm = SYSDATETIME()
+          AtualizadoEm = @AgoraBrasil
       WHERE LoteId = @LoteId
         AND StatusAjuste = N'Reservado';
 
@@ -889,9 +893,9 @@ const repassesGatewayService = {
           GatewayTransferStatus = COALESCE(@TransferStatus, r.GatewayTransferStatus),
           GatewayTransferValor = i.ValorTransferidoItem,
           GatewayTransferReceiptUrl = COALESCE(@ReceiptUrl, r.GatewayTransferReceiptUrl),
-          GatewaySolicitadoEm = COALESCE(r.GatewaySolicitadoEm, SYSDATETIME()),
+          GatewaySolicitadoEm = COALESCE(r.GatewaySolicitadoEm, @AgoraBrasil),
           GatewayUltimoEvento = N'FISIOHELP_TRANSFER_REQUESTED',
-          GatewayAtualizadoEm = SYSDATETIME(),
+          GatewayAtualizadoEm = @AgoraBrasil,
           GatewayErroMensagem = NULL
       FROM dbo.Repasses r
       JOIN dbo.LoteRepassesGatewayItens i ON i.RepasseId = r.Id
@@ -923,6 +927,7 @@ const repassesGatewayService = {
       req.input('TransferFee', sql.Decimal(10, 2), transferFee);
       req.input('Evento', sql.NVarChar(80), text(event, 80) ?? 'TRANSFER_DONE');
       req.input('UsuarioLog', sql.NVarChar(100), text(`${ctx.tipo}:${ctx.id}`, 100) ?? 'Sistema');
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       SET NOCOUNT ON;
       SET XACT_ABORT ON;
@@ -930,7 +935,7 @@ const repassesGatewayService = {
       BEGIN TRY
         BEGIN TRAN;
 
-        DECLARE @Agora DATETIME2(7) = SYSDATETIME();
+        DECLARE @Agora DATETIME2(7) = @AgoraBrasil;
 
         UPDATE dbo.LotesRepassesGateway
         SET Status = N'Concluido',
@@ -1061,6 +1066,7 @@ const repassesGatewayService = {
       req.input('Status', sql.NVarChar(30), status);
       req.input('DelayMinutes', sql.Int, delayMinutes);
       req.input('Erro', sql.NVarChar(500), text(erro?.message ?? erro ?? 'Falha ao processar repasse gateway.', 500));
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       SET NOCOUNT ON;
 
@@ -1069,32 +1075,32 @@ const repassesGatewayService = {
           AtivoGateway = 0,
           ProcessandoEm = NULL,
           ProximaTentativaEm = CASE
-            WHEN @Status = N'FalhaTemporaria' THEN DATEADD(MINUTE, @DelayMinutes, SYSDATETIME())
+            WHEN @Status = N'FalhaTemporaria' THEN DATEADD(MINUTE, @DelayMinutes, @AgoraBrasil)
             ELSE NULL
           END,
           GatewayErroMensagem = @Erro,
           GatewayUltimoEvento = N'FISIOHELP_TRANSFER_WORKER_ERROR',
-          AtualizadoEm = SYSDATETIME()
+          AtualizadoEm = @AgoraBrasil
       WHERE Id = @LoteId;
 
       UPDATE dbo.LoteRepassesGatewayItens
       SET StatusItem = N'Falha',
           AtivoGatewayItem = 0,
-          AtualizadoEm = SYSDATETIME()
+          AtualizadoEm = @AgoraBrasil
       WHERE LoteId = @LoteId
         AND StatusItem IN (N'Reservado', N'EnviadoGateway');
 
       UPDATE dbo.LoteRepassesGatewayAjustes
       SET StatusAjuste = N'Falha',
           AtivoGatewayAjuste = 0,
-          AtualizadoEm = SYSDATETIME()
+          AtualizadoEm = @AgoraBrasil
       WHERE LoteId = @LoteId
         AND StatusAjuste IN (N'Reservado', N'EnviadoGateway');
 
       UPDATE r
       SET GatewayErroMensagem = @Erro,
           GatewayUltimoEvento = N'FISIOHELP_TRANSFER_WORKER_ERROR',
-          GatewayAtualizadoEm = SYSDATETIME()
+          GatewayAtualizadoEm = @AgoraBrasil
       FROM dbo.Repasses r
       JOIN dbo.LoteRepassesGatewayItens i ON i.RepasseId = r.Id
       WHERE i.LoteId = @LoteId;
@@ -1157,12 +1163,13 @@ const repassesGatewayService = {
     const result = await queryWithContext(ctx, (req) => {
       req.input('Limit', sql.Int, Math.max(1, Math.min(Number(limit) || 5, 20)));
       req.input('MinAgeMinutes', sql.Int, Math.max(1, Number(minAgeMinutes) || 5));
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       SELECT TOP (@Limit) *
       FROM dbo.LotesRepassesGateway WITH (READCOMMITTEDLOCK)
       WHERE Status IN (N'EnviadoGateway', N'AguardandoConfirmacao')
         AND GatewayTransferId IS NOT NULL
-        AND COALESCE(EnviadoEm, AtualizadoEm, CriadoEm) <= DATEADD(MINUTE, -@MinAgeMinutes, SYSDATETIME())
+        AND COALESCE(EnviadoEm, AtualizadoEm, CriadoEm) <= DATEADD(MINUTE, -@MinAgeMinutes, @AgoraBrasil)
       ORDER BY COALESCE(EnviadoEm, AtualizadoEm, CriadoEm), Id;
     `);
 
@@ -1219,6 +1226,7 @@ const repassesGatewayService = {
       req.input('ReceiptUrl', sql.NVarChar(500), receiptUrl);
       req.input('TransferFee', sql.Decimal(10, 2), transferFee);
       req.input('Evento', sql.NVarChar(80), text(event, 80));
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     }, `
       UPDATE dbo.LotesRepassesGateway
       SET GatewayTransferId = COALESCE(@TransferId, GatewayTransferId),
@@ -1226,7 +1234,7 @@ const repassesGatewayService = {
           GatewayReceiptUrl = COALESCE(@ReceiptUrl, GatewayReceiptUrl),
           GatewayTransferFee = COALESCE(@TransferFee, GatewayTransferFee),
           GatewayUltimoEvento = COALESCE(@Evento, GatewayUltimoEvento),
-          AtualizadoEm = SYSDATETIME()
+          AtualizadoEm = @AgoraBrasil
       WHERE Id = @LoteId;
 
       UPDATE r
@@ -1234,7 +1242,7 @@ const repassesGatewayService = {
           GatewayTransferStatus = COALESCE(@TransferStatus, r.GatewayTransferStatus),
           GatewayTransferReceiptUrl = COALESCE(@ReceiptUrl, r.GatewayTransferReceiptUrl),
           GatewayUltimoEvento = COALESCE(@Evento, r.GatewayUltimoEvento),
-          GatewayAtualizadoEm = SYSDATETIME()
+          GatewayAtualizadoEm = @AgoraBrasil
       FROM dbo.Repasses r
       JOIN dbo.LoteRepassesGatewayItens i ON i.RepasseId = r.Id
       WHERE i.LoteId = @LoteId;
