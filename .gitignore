@@ -7,3 +7,10 @@ BKP/
 01-Postman/
 *estrutura_backend*
 *-copia*
+local.settings.json
+azure-functions/local.settings.json
+azure-functions/__azurite_db_*.json
+azure-functions/__blobstorage__/
+azure-functions/__queuestorage__/
+azure-functions/__tablestorage__/
+azure-functions/AzuriteConfig

@@ -1,0 +1,14 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "SQL_SERVER": "sql-fisiohelp-hml-brs.database.windows.net",
+    "SQL_DATABASE": "mvpdb-hml",
+    "SQL_USER": "",
+    "SQL_PASSWORD": "",
+    "SQL_ENCRYPT": "true",
+    "SQL_TRUST_SERVER_CERTIFICATE": "false",
+    "APP_TIME_ZONE": "America/Sao_Paulo"
+  }
+}
