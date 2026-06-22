@@ -531,10 +531,8 @@ const arquivosController = {
 
       const lowerPath = rel.toLowerCase();
       const isPdf = lowerPath.endsWith('.pdf');
-      const isImage =
-        lowerPath.endsWith('.jpg') ||
-        lowerPath.endsWith('.jpeg') ||
-        lowerPath.endsWith('.png');
+      const isImage = ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif']
+        .some((ext) => lowerPath.endsWith(ext));
 
       if (isImage) {
         return fileStorageProvider.sendFile(res, rel, {
@@ -547,7 +545,7 @@ const arquivosController = {
       if (!isPdf) {
         return res.status(404).json({
           sucesso: false,
-          erro: 'Thumbnail disponível apenas para PDF, JPG, JPEG ou PNG.'
+          erro: 'Thumbnail disponível apenas para PDF ou imagem.'
         });
       }
 
