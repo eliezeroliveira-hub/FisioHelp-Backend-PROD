@@ -6,7 +6,7 @@
   "main": "src/functions/*.js",
   "scripts": {
     "start": "func start",
-    "check": "node --check src/shared/appDateTime.js && node --check src/shared/db.js && node --check src/shared/jobRunner.js && node --check src/functions/verificarConsultasExpiradas.js && node --check src/functions/marcarNoShow.js && node --check src/functions/marcarNoShowFisioterapeuta.js && node --check src/functions/processarPontosFisioterapeutas.js && node --check src/functions/expirarPremiumVencidos.js"
+    "check": "node --check src/shared/appDateTime.js && node --check src/shared/db.js && node --check src/shared/jobRunner.js && node --check src/functions/verificarConsultasExpiradas.js && node --check src/functions/marcarNoShow.js && node --check src/functions/marcarNoShowFisioterapeuta.js && node --check src/functions/processarPontosFisioterapeutas.js && node --check src/functions/expirarPremiumVencidos.js && node --check src/functions/processarRepassesSemanais.js && node --check src/functions/limpezaLogCacheSemanal.js && node --check src/functions/purgeLogsAntigos.js && node --check src/functions/purgeLogsChatModeration.js && node --check src/functions/purgeLogsEncerramento.js && node --check src/functions/purgeLogsRankingUpdate.js && node --check src/functions/atualizaCachesAutomatico.js"
   },
   "dependencies": {
     "@azure/functions": "^4.7.3",
