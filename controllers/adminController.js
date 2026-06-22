@@ -1,9 +1,9 @@
 // controllers/adminController.js
-import path from 'path';
 import adminService from '../services/adminService.js';
 import adminAnalyticsService from '../services/adminAnalyticsService.js';
 import disputasService from '../services/disputasService.js';
 import { log } from '../config/logger.js';
+import fileStorageProvider from '../providers/fileStorageProvider.js';
 
 function buildAuditMeta(req) {
   const ip = req?.ip || req?.socket?.remoteAddress || null;
@@ -75,11 +75,13 @@ const adminController = {
 
     const arquivo = await adminService.downloadDocumento(usuario, documentoId);
 
-    // pega só o nome do arquivo (ex.: "1765477288641-754574072.mp4")
-    const nomeArquivo = path.basename(arquivo);
-
     // força download com esse nome
-    return res.download(arquivo, nomeArquivo);
+    return fileStorageProvider.sendFile(res, arquivo.caminhoArquivo, {
+      disposition: 'attachment',
+      fileName: arquivo.nomeArquivo,
+      cacheControl: 'no-store',
+      rangeHeader: req.headers.range,
+    });
   } catch (erro) {
     log('error', 'Erro ao baixar documento', { erro: erro.message });
     return res.status(500).json({ erro: 'Erro interno do servidor.' });

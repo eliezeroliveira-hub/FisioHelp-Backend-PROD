@@ -1,7 +1,6 @@
 // 📁 controllers/recibosController.js
-import fs from 'fs';
-import path from 'path';
 import recibosService from '../services/recibosService.js';
+import fileStorageProvider from '../providers/fileStorageProvider.js';
 
 function requireUsuario(req, res) {
   const u = req.usuario;
@@ -60,24 +59,16 @@ export default {
       const inline = String(req.query?.inline || '') === '1';
 
       const pdfInfo = await recibosService.obterPdf(u, id);
-      if (!pdfInfo?.absPath) return res.status(404).json({ sucesso: false, erro: 'Recibo/PDF não encontrado.' });
+      const storagePath = pdfInfo?.storagePath || pdfInfo?.relPath;
+      if (!storagePath) return res.status(404).json({ sucesso: false, erro: 'Recibo/PDF não encontrado.' });
 
-      const absPath = pdfInfo.absPath;
-      const fileName = pdfInfo.fileName || path.basename(absPath);
-
-      // Segurança: garante que arquivo existe
-      try {
-        await fs.promises.access(absPath, fs.constants.F_OK);
-      } catch {
-        return res.status(404).json({ sucesso: false, erro: 'Arquivo do recibo não encontrado.' });
-      }
-
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${fileName}"`);
-
-      const stream = fs.createReadStream(absPath);
-      stream.on('error', () => res.status(500).end());
-      return stream.pipe(res);
+      return fileStorageProvider.sendFile(res, storagePath, {
+        disposition: inline ? 'inline' : 'attachment',
+        fileName: pdfInfo.fileName,
+        contentType: 'application/pdf',
+        cacheControl: 'no-store',
+        rangeHeader: req.headers.range,
+      });
     } catch (e) {
       const status = e?.httpStatus || 500;
       return res.status(status).json({ sucesso: false, erro: status >= 500 ? 'Erro interno do servidor.' : (e?.message || '') });

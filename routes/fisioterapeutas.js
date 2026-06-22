@@ -205,6 +205,13 @@ router.patch(
   fisioterapeutasController.atualizarFormacao
 );
 
+router.delete(
+  '/formacoes/:id',
+  autenticarJWT,
+  requireAuth,
+  verificarPermissao(['Fisioterapeuta']),
+  fisioterapeutasController.removerFormacao
+);
 // ✅ Status da validação de documentos
 router.get(
   '/documentos/status',

@@ -1,5 +1,6 @@
 // controllers/suporteController.js
 import suporteService from '../services/suporteService.js';
+import fileStorageProvider from '../providers/fileStorageProvider.js';
 
 function getStatusCode(err) {
   return Number(err?.statusCode || err?.status || 500);
@@ -150,11 +151,13 @@ export default {
         anexoId,
       });
 
-      if (arquivo?.mimeType) {
-        res.setHeader('Content-Type', arquivo.mimeType);
-      }
-
-      return res.download(arquivo.caminhoArquivo, arquivo.nomeArquivo);
+      return fileStorageProvider.sendFile(res, arquivo.caminhoArquivo, {
+        disposition: 'attachment',
+        fileName: arquivo.nomeArquivo,
+        contentType: arquivo.mimeType,
+        cacheControl: 'no-store',
+        rangeHeader: req.headers.range,
+      });
     } catch (err) {
       const statusCode = getStatusCode(err);
       return res.status(statusCode).json({

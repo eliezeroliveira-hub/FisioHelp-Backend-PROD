@@ -12,6 +12,7 @@ import { sql } from '../config/dbConfig.js';
 import { queryWithContext } from './_queryWithContext.js';
 import { formatCNPJ } from '../utils/identityValidators.js';
 import { agoraBrasilDate } from '../utils/appDateTime.js';
+import fileStorageProvider from '../providers/fileStorageProvider.js';
 
 function toInt(v) {
   const n = Number(v);
@@ -62,30 +63,8 @@ const RECIBO_LAYOUT_VERSION_ATENDIMENTO = 'v5';
 const RECIBO_LAYOUT_VERSION_REEMBOLSO = 'v6';
 const pdfEmAndamento = new Map();
 
-function resolveSafeUploadsPath(relativeOrAbsolutePath) {
-  const relative = String(relativeOrAbsolutePath || '').replace(/^\/+/, '');
-  const abs = path.resolve(UPLOADS_DIR, relative);
-  const uploadsRoot = path.resolve(UPLOADS_DIR);
-  const absNorm = path.normalize(abs);
-  const rootNorm = path.normalize(uploadsRoot + path.sep);
-
-  if (!(absNorm === path.normalize(uploadsRoot) || absNorm.startsWith(rootNorm))) {
-    throw Object.assign(new Error('Caminho inválido.'), { httpStatus: 400 });
-  }
-  return abs;
-}
-
 async function ensureDir(p) {
   await fs.promises.mkdir(p, { recursive: true });
-}
-
-async function fileExists(p) {
-  try {
-    await fs.promises.access(p, fs.constants.F_OK);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function reciboLayoutVersion(tipoRecibo) {
@@ -636,9 +615,9 @@ async function gerarPdfSeNecessarioSemMutex(usuario, pacienteId, reciboId) {
 
   // Se já tem caminho, arquivo existe e já está no layout atual, só devolve.
   if (detalhe.CaminhoArquivo && isReciboLayoutAtual(detalhe.CaminhoArquivo, detalhe.TipoRecibo)) {
-    const abs = resolveSafeUploadsPath(detalhe.CaminhoArquivo);
-    if (await fileExists(abs)) {
-      return { absPath: abs, fileName: path.basename(abs), relPath: detalhe.CaminhoArquivo };
+    const rel = fileStorageProvider.normalizeStoragePath(detalhe.CaminhoArquivo);
+    if (await fileStorageProvider.fileExists(rel)) {
+      return { storagePath: rel, fileName: path.basename(rel), relPath: rel };
     }
   }
 
@@ -658,6 +637,14 @@ async function gerarPdfSeNecessarioSemMutex(usuario, pacienteId, reciboId) {
         dataGeracao: detalhe.DataGeracao || agoraBrasilDate()
       });
 
+  await fileStorageProvider.uploadFile(relPath, absPath, {
+    contentType: 'application/pdf',
+    cacheControl: 'no-store',
+  });
+  if (fileStorageProvider.isAzureBlobStorageEnabled) {
+    await fileStorageProvider.cleanupLocalTempFile(absPath);
+  }
+
   // Grava caminho relativo no banco (somente "recibos/<arquivo>.pdf")
   await queryWithContext(
     usuario,
@@ -675,7 +662,7 @@ async function gerarPdfSeNecessarioSemMutex(usuario, pacienteId, reciboId) {
     `
   );
 
-  return { absPath, fileName, relPath };
+  return { storagePath: relPath, fileName, relPath };
 }
 
 async function garantirPdfSeNecessario(usuario, pacienteId, reciboId) {

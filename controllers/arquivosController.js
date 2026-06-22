@@ -1,16 +1,22 @@
 // 📁 controllers/arquivosController.js
 import path from 'path';
+import os from 'os';
 import fs from 'fs';
 import { spawn } from 'child_process';
 import { sql } from '../config/dbConfig.js';
+import { ENV } from '../config/env.js';
 import { queryWithContext } from '../services/_queryWithContext.js';
 import chatService from '../services/chatService.js';
 import pacientesService from '../services/pacientesService.js';
+import fileStorageProvider from '../providers/fileStorageProvider.js';
 
 const uploadsBase = path.resolve('uploads');
 const certificadosBase = path.resolve(uploadsBase, 'certificados');
 const thumbsBase = path.resolve(certificadosBase, '_thumbs');
-const pedidosMedicosBase = path.resolve(uploadsBase, 'pedidos-medicos');
+
+function contextoSistema() {
+  return { tipo: 'Admin', id: Number(ENV.SYSTEM_ADMIN_ID ?? 1) };
+}
 
 function normalizarRelPath(p) {
   return String(p || '').trim().replace(/\\/g, '/');
@@ -64,23 +70,6 @@ function validarRelCertificado(rel) {
   }
 }
 
-function startsWithPath(fullPath, basePath) {
-  const a = path.resolve(fullPath).toLowerCase();
-  const b = path.resolve(basePath).toLowerCase();
-  return a.startsWith(b);
-}
-
-function montarCaminhoSeguro(rel) {
-  const fullPath = path.resolve(uploadsBase, rel);
-
-  // Deve ficar estritamente dentro de uploads/certificados
-  if (!startsWithPath(fullPath, certificadosBase)) {
-    throw new Error('Path traversal bloqueado.');
-  }
-
-  return fullPath;
-}
-
 function normalizarRelPedidoMedicoFromDb(caminhoArquivo) {
   const p = normalizarRelPath(caminhoArquivo);
   if (!p) throw new Error('Caminho do arquivo não informado.');
@@ -116,16 +105,6 @@ function validarRelPedidoMedico(rel) {
   if (parts.some((seg) => seg === '..' || seg.includes('..'))) {
     throw new Error('Path traversal bloqueado.');
   }
-}
-
-function montarCaminhoSeguroPedidoMedico(rel) {
-  const fullPath = path.resolve(uploadsBase, rel);
-
-  if (!startsWithPath(fullPath, pedidosMedicosBase)) {
-    throw new Error('Path traversal bloqueado.');
-  }
-
-  return fullPath;
 }
 
 function getUsuarioInfo(usuario) {
@@ -164,7 +143,7 @@ async function resolverCertificadoPublicoOuAutorizado(usuario, formacaoId) {
   }
 
   const result = await queryWithContext(
-    usuario,
+    contextoSistema(),
     (r) => {
       r.input('Id', sql.Int, id);
     },
@@ -261,10 +240,9 @@ async function resolverPedidoMedicoAutorizado(usuario, documentoPacienteId) {
 
   const rel = normalizarRelPedidoMedicoFromDb(row.CaminhoArquivo);
   validarRelPedidoMedico(rel);
-  const fullPath = montarCaminhoSeguroPedidoMedico(rel);
 
-  if (!await fileExists(fullPath)) {
-    throw Object.assign(new Error('Arquivo não existe no disco.'), { statusCode: 404 });
+  if (!await fileStorageProvider.fileExists(rel)) {
+    throw Object.assign(new Error('Arquivo não existe no servidor.'), { statusCode: 404 });
   }
 
   return {
@@ -272,8 +250,8 @@ async function resolverPedidoMedicoAutorizado(usuario, documentoPacienteId) {
     consultaId: row.ConsultaId,
     pacienteId: row.PacienteId,
     fisioterapeutaId: row.FisioterapeutaId,
-    caminhoArquivo: fullPath,
-    nomeArquivo: path.basename(fullPath),
+    caminhoArquivo: rel,
+    nomeArquivo: path.basename(rel),
   };
 }
 
@@ -380,22 +358,13 @@ const arquivosController = {
         return res.status(400).json({ sucesso: false, erro: e.message });
       }
 
-      let fullPath;
-      try {
-        fullPath = montarCaminhoSeguro(rel);
-      } catch (e) {
-        return res.status(400).json({ sucesso: false, erro: e.message });
-      }
-
-      if (!await fileExists(fullPath)) {
-        return res.status(404).json({ sucesso: false, erro: 'Arquivo não existe no disco.' });
-      }
-
       // ✅ força download
-      res.setHeader('Content-Disposition', `attachment; filename="${path.basename(fullPath)}"`);
-      res.setHeader('Cache-Control', 'no-store');
-
-      return res.sendFile(fullPath);
+      return fileStorageProvider.sendFile(res, rel, {
+        disposition: 'attachment',
+        fileName: path.basename(rel),
+        cacheControl: 'no-store',
+        rangeHeader: req.headers.range,
+      });
     } catch (err) {
       return res.status(500).json({
         sucesso: false,
@@ -424,22 +393,13 @@ const arquivosController = {
         return res.status(400).json({ sucesso: false, erro: e.message });
       }
 
-      let fullPath;
-      try {
-        fullPath = montarCaminhoSeguro(rel);
-      } catch (e) {
-        return res.status(400).json({ sucesso: false, erro: e.message });
-      }
-
-      if (!await fileExists(fullPath)) {
-        return res.status(404).json({ sucesso: false, erro: 'Arquivo não existe no disco.' });
-      }
-
       // ✅ inline (não força download)
-      res.setHeader('Content-Disposition', 'inline');
-      res.setHeader('Cache-Control', 'no-store');
-
-      return res.sendFile(fullPath);
+      return fileStorageProvider.sendFile(res, rel, {
+        disposition: 'inline',
+        fileName: path.basename(rel),
+        cacheControl: 'no-store',
+        rangeHeader: req.headers.range,
+      });
     } catch (err) {
       const status = err?.statusCode || err?.status || 500;
       return res.status(status).json({
@@ -565,12 +525,11 @@ const arquivosController = {
         return res.status(400).json({ sucesso: false, erro: e.message });
       }
 
-      const fullPath = montarCaminhoSeguro(rel);
-      if (!await fileExists(fullPath)) {
-        return res.status(404).json({ sucesso: false, erro: 'Arquivo não existe no disco.' });
+      if (!await fileStorageProvider.fileExists(rel)) {
+        return res.status(404).json({ sucesso: false, erro: 'Arquivo não existe no servidor.' });
       }
 
-      const lowerPath = fullPath.toLowerCase();
+      const lowerPath = rel.toLowerCase();
       const isPdf = lowerPath.endsWith('.pdf');
       const isImage =
         lowerPath.endsWith('.jpg') ||
@@ -578,8 +537,11 @@ const arquivosController = {
         lowerPath.endsWith('.png');
 
       if (isImage) {
-        res.setHeader('Cache-Control', 'no-store');
-        return res.sendFile(fullPath);
+        return fileStorageProvider.sendFile(res, rel, {
+          disposition: 'inline',
+          fileName: path.basename(rel),
+          cacheControl: 'no-store',
+        });
       }
 
       if (!isPdf) {
@@ -593,8 +555,10 @@ const arquivosController = {
       const thumbPath = path.resolve(thumbsBase, `${row.Id}.png`);
 
       if (!await fileExists(thumbPath)) {
+        const tempPdfPath = path.join(os.tmpdir(), `fisiohelp-cert-${row.Id}-${Date.now()}.pdf`);
         try {
-          await gerarThumbPdf({ pdfPath: fullPath, thumbPath });
+          await fileStorageProvider.downloadToFile(rel, tempPdfPath);
+          await gerarThumbPdf({ pdfPath: tempPdfPath, thumbPath });
         } catch (e) {
           return res.status(500).json({
             sucesso: false,
@@ -602,6 +566,8 @@ const arquivosController = {
             detalhe: 'Erro interno do servidor.',
             dica: 'Instale ImageMagick (magick) ou Poppler (pdftoppm) no PATH do servidor.'
           });
+        } finally {
+          await fs.promises.unlink(tempPdfPath).catch(() => {});
         }
       }
 
@@ -633,9 +599,12 @@ const arquivosController = {
         req.params.documentoPacienteId
       );
 
-      res.setHeader('Content-Disposition', `inline; filename="${arquivo.nomeArquivo}"`);
-      res.setHeader('Cache-Control', 'no-store');
-      return res.sendFile(arquivo.caminhoArquivo);
+      return fileStorageProvider.sendFile(res, arquivo.caminhoArquivo, {
+        disposition: 'inline',
+        fileName: arquivo.nomeArquivo,
+        cacheControl: 'no-store',
+        rangeHeader: req.headers.range,
+      });
     } catch (err) {
       const status = err?.statusCode || err?.status || 500;
       return res.status(status).json({
@@ -660,8 +629,12 @@ const arquivosController = {
         req.params.documentoPacienteId
       );
 
-      res.setHeader('Cache-Control', 'no-store');
-      return res.download(arquivo.caminhoArquivo, arquivo.nomeArquivo);
+      return fileStorageProvider.sendFile(res, arquivo.caminhoArquivo, {
+        disposition: 'attachment',
+        fileName: arquivo.nomeArquivo,
+        cacheControl: 'no-store',
+        rangeHeader: req.headers.range,
+      });
     } catch (err) {
       const status = err?.statusCode || err?.status || 500;
       return res.status(status).json({
@@ -694,12 +667,29 @@ const arquivosController = {
 
       // Caminho RELATIVO dentro de uploads/
       const caminhoRelativo = normalizarRelPath(`pedidos-medicos/${req.file.filename}`);
+      let arquivoSubido = false;
+
+      await fileStorageProvider.uploadFile(caminhoRelativo, req.file.path, {
+        contentType: req.file.mimetype,
+        cacheControl: 'no-store',
+      });
+      arquivoSubido = true;
 
       // Registra no banco (valida consulta existe + confirmada)
-      const reg = await pacientesService.registrarPedidoMedico(usuario, {
-        consultaId,
-        caminhoArquivo: caminhoRelativo
-      });
+      let reg;
+      try {
+        reg = await pacientesService.registrarPedidoMedico(usuario, {
+          consultaId,
+          caminhoArquivo: caminhoRelativo
+        });
+      } catch (err) {
+        if (arquivoSubido) await fileStorageProvider.deleteFile(caminhoRelativo).catch(() => {});
+        throw err;
+      } finally {
+        if (fileStorageProvider.isAzureBlobStorageEnabled) {
+          await fileStorageProvider.cleanupLocalTempFile(req.file.path);
+        }
+      }
 
       const documentoPacienteId = reg?.documentoPacienteId ?? reg?.id ?? null;
 
@@ -725,9 +715,11 @@ const arquivosController = {
         notificacaoChat
       });
     } catch (err) {
-      // se deu erro após salvar arquivo, tenta remover do disco (evita órfãos)
+      // se deu erro antes/depois do upload, tenta remover o temporário local
       try {
-        if (req.file?.path && await fileExists(req.file.path)) {
+        if (req.file?.path && fileStorageProvider.isAzureBlobStorageEnabled) {
+          await fileStorageProvider.cleanupLocalTempFile(req.file.path);
+        } else if (req.file?.path && await fileExists(req.file.path)) {
           await fs.promises.unlink(req.file.path);
         }
       } catch (_) {}
@@ -744,6 +736,8 @@ const arquivosController = {
 };
 
 export default arquivosController;
+
+
 
 
 

@@ -4,6 +4,7 @@ import consultasController from '../controllers/consultasController.js';
 import { autenticarJWT, requireAuth } from '../middleware/authJWT.js';
 import verificarPermissao from '../middleware/verificarPermissao.js';
 import { uploadEvidenciaCheckin, validarMagicBytesEvidenciaCheckin } from '../middleware/uploadArquivos.js';
+import fileStorageProvider from '../providers/fileStorageProvider.js';
 
 const router = express.Router();
 
@@ -169,16 +170,30 @@ router.post(
   // Envie como multipart/form-data, campo do arquivo: "arquivo".
   uploadEvidenciaCheckin.single('arquivo'),
   validarMagicBytesEvidenciaCheckin,
-  (req, _res, next) => {
-    if (req?.file?.filename) {
-      const rel = `checkin/${req.file.filename}`;
+  async (req, _res, next) => {
+    try {
+      if (req?.file?.filename) {
+        const rel = `checkin/${req.file.filename}`;
+        await fileStorageProvider.uploadFile(rel, req.file.path, {
+          contentType: req.file.mimetype,
+          cacheControl: 'no-store',
+        });
+        if (fileStorageProvider.isAzureBlobStorageEnabled) {
+          await fileStorageProvider.cleanupLocalTempFile(req.file.path);
+        }
 
-      // Compatibilidade com service: ele lê "evidenciaUrl" e/ou "EvidenciaCheckin".
-      req.body = req.body || {};
-      if (!req.body.EvidenciaCheckin) req.body.EvidenciaCheckin = rel;
-      if (!req.body.evidenciaUrl) req.body.evidenciaUrl = rel;
+        // Compatibilidade com service: ele lê "evidenciaUrl" e/ou "EvidenciaCheckin".
+        req.body = req.body || {};
+        if (!req.body.EvidenciaCheckin) req.body.EvidenciaCheckin = rel;
+        if (!req.body.evidenciaUrl) req.body.evidenciaUrl = rel;
+      }
+      next();
+    } catch (err) {
+      if (fileStorageProvider.isAzureBlobStorageEnabled) {
+        await fileStorageProvider.cleanupLocalTempFile(req?.file?.path).catch(() => {});
+      }
+      next(err);
     }
-    next();
   },
   consultasController.comparecimento
 );

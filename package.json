@@ -9,6 +9,8 @@
     "dev": "nodemon server.js",
     "lint": "npx eslint .",
     "check:env": "node -e \"require('dotenv').config(); console.log(process.env);\"",
+    "uploads:blob:dry-run": "node scripts/migrarUploadsParaBlob.js --dry-run",
+    "uploads:blob:migrate": "node scripts/migrarUploadsParaBlob.js",
     "test": "echo \"No tests configured yet.\" && exit 0"
   },
   "keywords": [
@@ -26,6 +28,7 @@
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.1068.0",
     "@azure/communication-email": "^1.1.0",
+    "@azure/storage-blob": "^12.32.0",
     "apple-signin-auth": "^2.0.0",
     "axios": "^1.7.3",
     "bcrypt": "^6.0.0",

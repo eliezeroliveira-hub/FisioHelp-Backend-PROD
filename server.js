@@ -33,6 +33,7 @@ import { startNotificacoesWorker } from './workers/notificacoesWorker.js';
 import { startAvaliacoesPendentesWorker } from './workers/avaliacoesPendentesWorker.js';
 import { startConsultasLembretesWorker } from './workers/consultasLembretesWorker.js';
 import { isContatoProviderReal } from './providers/contatoProvider.js';
+import fileStorageProvider from './providers/fileStorageProvider.js';
 
 // 🔧 Inicialização
 const app = express();
@@ -127,9 +128,28 @@ app.use(compression());
 // 📝 Agora sim, logamos com userId e tipo corretos
 app.use(requestLogger);
 
-// 📷 Exposição pública APENAS da pasta de fotos de perfil
-app.use('/uploads/fotos_perfil', express.static(path.resolve('uploads', 'fotos_perfil')));
-app.use('/uploads/checkin', express.static(path.resolve('uploads', 'checkin')));
+// 📷 Exposição pública APENAS de arquivos já públicos no desenho atual.
+// Em Azure Blob, o container fica privado e o backend faz streaming pela mesma URL.
+if (!fileStorageProvider.isAzureBlobStorageEnabled) {
+  app.use('/uploads/fotos_perfil', express.static(path.resolve('uploads', 'fotos_perfil')));
+  app.use('/uploads/checkin', express.static(path.resolve('uploads', 'checkin')));
+}
+app.get(/^\/uploads\/(fotos_perfil|checkin)\/(.+)$/, async (req, res, next) => {
+  try {
+    const pasta = req.params[0];
+    const arquivo = req.params[1];
+    await fileStorageProvider.sendFile(res, `${pasta}/${arquivo}`, {
+      disposition: 'inline',
+      cacheControl: pasta === 'fotos_perfil' ? 'public, max-age=86400' : 'no-store',
+      fileName: path.basename(arquivo),
+      rangeHeader: req.headers.range,
+    });
+  } catch (err) {
+    const status = err?.statusCode || err?.httpStatus || 500;
+    if (status === 404) return res.status(404).json({ erro: 'Arquivo não encontrado.' });
+    return next(err);
+  }
+});
 
 // 🧪 Debug (verificar sessão SQL + JWT) — apenas fora de produção
 if (ENV.NODE_ENV !== 'production') {

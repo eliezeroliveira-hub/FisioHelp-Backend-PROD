@@ -1,9 +1,8 @@
 // 📁 services/notasFiscaisService.js
-import fs from 'fs';
-import path from 'path';
 import { sql } from '../config/dbConfig.js';
 import { queryWithContext } from './_queryWithContext.js';
 import { HttpError } from '../utils/httpError.js';
+import fileStorageProvider from '../providers/fileStorageProvider.js';
 
 function asTipo(u) { return String(u?.tipo || '').toLowerCase(); }
 function isAdmin(u) { return asTipo(u) === 'admin'; }
@@ -17,62 +16,39 @@ function assertId(value, label) {
   return n;
 }
 
-// ✅ Igual ao seu padrão de vídeos: uploadsBase + subpasta
-const uploadsBase = path.resolve('uploads');                 // ex: ...\mvp-backend\uploads
-const nfsDir = path.join(uploadsBase, 'NFs');                // ex: ...\mvp-backend\uploads\NFs
-
-let nfsDirReadyPromise = null;
-async function ensureNfsDir() {
-  if (!nfsDirReadyPromise) {
-    nfsDirReadyPromise = fs.promises.mkdir(nfsDir, { recursive: true });
-  }
-  await nfsDirReadyPromise;
-}
-
 function normalizeRel(p) {
   return String(p || '').replaceAll('\\', '/');
 }
 
 // Aceita:
 // - "NFs/2025-11/NF-123.pdf" (relativo ao uploadsBase)
-// - "2025-11/NF-123.pdf"     (relativo ao nfsDir)
-async function resolveNfAbsolute(dbPath) {
+// - "2025-11/NF-123.pdf"     (relativo ao diretório lógico NFs)
+function resolveNfStoragePath(dbPath) {
   if (!dbPath) return null;
+
   const rel = normalizeRel(dbPath);
+  const storagePath = fileStorageProvider.normalizeStoragePath(
+    rel.toLowerCase().startsWith('nfs/') ? rel : `NFs/${rel}`
+  );
 
-  const candidate = rel.toLowerCase().startsWith('nfs/')
-    ? path.resolve(uploadsBase, rel)
-    : path.resolve(nfsDir, rel);
-
-  // 🔒 bloqueia path traversal e garante ficar *dentro* de uploads/NFs
-  const base = path.resolve(nfsDir);
-  const relToBase = path.relative(base, candidate);
-  if (relToBase.startsWith('..') || path.isAbsolute(relToBase)) return null;
-
-  try {
-    await fs.promises.access(candidate, fs.constants.F_OK);
-  } catch {
-    return null;
-  }
-
-  return candidate;
+  if (!storagePath.toLowerCase().startsWith('nfs/')) return null;
+  return storagePath;
 }
 
-// ✅ Helper (admin/integração): salva PDF/XML no disco e devolve caminho relativo (para gravar no banco)
-async function salvarArquivoNfEmDisco({ competencia, numeroNf, nfId, tipo, buffer, base64 }) {
-  await ensureNfsDir();
+function mimeFromExt(ext) {
+  return ext === 'xml' ? 'application/xml' : 'application/pdf';
+}
 
+// Helper (admin/integração): salva PDF/XML no provider configurado e devolve caminho relativo para gravar no banco.
+// O nome histórico foi mantido para não quebrar chamadas existentes.
+async function salvarArquivoNfEmDisco({ competencia, numeroNf, nfId, tipo, buffer, base64 }) {
   const ext = String(tipo || '').toLowerCase();
   if (!['pdf', 'xml'].includes(ext)) throw new HttpError(400, 'Tipo inválido. Use pdf ou xml.');
 
   const comp = String(competencia || 'sem-competencia').replace(/[^\d\-]/g, '') || 'sem-competencia';
-  const pasta = path.join(nfsDir, comp);
-  await fs.promises.mkdir(pasta, { recursive: true });
-
   const nomeBase = numeroNf ? `NF-${String(numeroNf)}` : `NF-${assertId(nfId, 'nfId')}`;
   const safeName = nomeBase.replace(/[^\w\-\.]/g, '_');
-
-  const fullPath = path.join(pasta, `${safeName}.${ext}`);
+  const relativePath = `NFs/${comp}/${safeName}.${ext}`;
 
   const fileBuffer = Buffer.isBuffer(buffer)
     ? buffer
@@ -80,16 +56,16 @@ async function salvarArquivoNfEmDisco({ competencia, numeroNf, nfId, tipo, buffe
 
   if (!fileBuffer?.length) throw new HttpError(400, 'Conteúdo do arquivo vazio.');
 
-  await fs.promises.writeFile(fullPath, fileBuffer);
+  await fileStorageProvider.uploadBuffer(relativePath, fileBuffer, {
+    contentType: mimeFromExt(ext),
+    cacheControl: 'no-store'
+  });
 
-  // ✅ padrão igual vídeos: caminho relativo ao "uploads"
-  return `NFs/${comp}/${safeName}.${ext}`;
+  return relativePath;
 }
 
 const notasFiscaisService = {
   async listar(usuario, { fisioterapeutaId = null, status = null, competencia = null, page = 1, pageSize = 20 } = {}) {
-    await ensureNfsDir();
-
     requireAuth(usuario);
     if (!isAdmin(usuario) && !isFisio(usuario)) throw new HttpError(403, 'Acesso negado.');
 
@@ -168,17 +144,23 @@ const notasFiscaisService = {
     if (!nf) return null;
 
     const ext = String(tipo || '').toLowerCase();
+    if (!['pdf', 'xml'].includes(ext)) throw new HttpError(400, 'Tipo inválido. Use pdf ou xml.');
+
     const caminho = ext === 'xml' ? nf.CaminhoXml : nf.CaminhoPdf;
     if (!caminho) return null;
 
-    const absolute = await resolveNfAbsolute(caminho);
-    if (!absolute) return null;
+    const storagePath = resolveNfStoragePath(caminho);
+    if (!storagePath) return null;
+
+    const exists = await fileStorageProvider.fileExists(storagePath);
+    if (!exists) return null;
 
     const base = nf.NumeroNf ? `NF-${String(nf.NumeroNf)}` : `NF-${nf.Id}`;
     const safeBase = base.replace(/[^\w\-\.]/g, '_');
 
     return {
-      fullPath: absolute,
+      storagePath,
+      mime: mimeFromExt(ext),
       fileName: `${safeBase}.${ext === 'xml' ? 'xml' : 'pdf'}`
     };
   },

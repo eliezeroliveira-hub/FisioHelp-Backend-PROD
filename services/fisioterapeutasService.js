@@ -1,8 +1,11 @@
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import { sql } from '../config/dbConfig.js';
 import { log } from '../config/logger.js';
 import { queryWithContext } from './_queryWithContext.js';
+import { ENV } from '../config/env.js';
 import { obterPendenciaAvaliacaoFisioterapeuta } from './avaliacoesService.js';
 import {
   montarEmailConvitePreCadastroSimples,
@@ -21,10 +24,15 @@ import {
   normalizeEmail as normalizeEmailAddress,
 } from '../utils/identityValidators.js';
 import { validatePasswordStrength } from '../utils/passwordPolicy.js';
+import fileStorageProvider from '../providers/fileStorageProvider.js';
 
 const APP_TIME_ZONE = 'America/Sao_Paulo';
 const CNPJ_ALFANUMERICO_REPASSE_MSG =
   'CNPJ alfanumérico ainda não é suportado pelo gateway para repasse via TED ou chave Pix do tipo CNPJ. Para receber repasses, cadastre uma chave Pix do tipo e-mail, telefone ou chave aleatória.';
+
+function contextoSistema() {
+  return { tipo: 'Admin', id: Number(ENV.SYSTEM_ADMIN_ID ?? 1) };
+}
 
 // --- Utilitários de normalização para verificação de contato ---
 function normalizarEmail(email) {
@@ -89,6 +97,62 @@ function normalizeDestinoContato(canalNorm, destino) {
 
 function gerarCodigo6() {
   return String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+}
+
+async function obterFotoPerfilAtual(fisioterapeutaId) {
+  const result = await queryWithContext(contextoSistema(), (req) => {
+    req.input('FisioterapeutaId', sql.Int, Number(fisioterapeutaId));
+  }, `
+    SELECT TOP 1
+      d.Id AS FotoPerfilDocumentoId,
+      d.CaminhoArquivo AS FotoPerfilUrl
+    FROM dbo.Fisioterapeutas f
+    INNER JOIN dbo.DocumentosFisioterapeutas d
+      ON d.Id = f.FotoPerfilDocumentoId
+     AND d.FisioterapeutaId = f.Id
+     AND d.TipoDocumento = N'FOTO_PERFIL'
+     AND d.Status = N'Aprovado'
+    WHERE f.Id = @FisioterapeutaId;
+  `);
+
+  return result.recordset?.[0] || null;
+}
+
+
+async function obterFotosPerfilAtuais(fisioterapeutaIds) {
+  const ids = [...new Set((fisioterapeutaIds || [])
+    .map((id) => Number(id))
+    .filter((id) => Number.isInteger(id) && id > 0))];
+
+  if (ids.length === 0) return new Map();
+
+  const result = await queryWithContext(contextoSistema(), (req) => {
+    req.input('IdsJson', sql.NVarChar(sql.MAX), JSON.stringify(ids));
+  }, `
+    WITH Ids AS (
+      SELECT DISTINCT TRY_CAST([value] AS INT) AS FisioterapeutaId
+      FROM OPENJSON(@IdsJson)
+      WHERE TRY_CAST([value] AS INT) > 0
+    )
+    SELECT
+      i.FisioterapeutaId,
+      d.Id AS FotoPerfilDocumentoId,
+      d.CaminhoArquivo AS FotoPerfilUrl
+    FROM Ids i
+    INNER JOIN dbo.Fisioterapeutas f
+      ON f.Id = i.FisioterapeutaId
+    INNER JOIN dbo.DocumentosFisioterapeutas d
+      ON d.Id = f.FotoPerfilDocumentoId
+     AND d.FisioterapeutaId = f.Id
+     AND d.TipoDocumento = N'FOTO_PERFIL'
+     AND d.Status = N'Aprovado';
+  `);
+
+  const map = new Map();
+  for (const row of result.recordset || []) {
+    map.set(Number(row.FisioterapeutaId), row);
+  }
+  return map;
 }
 
 function normalizeOptionalText(value, max = 1000) {
@@ -650,6 +714,10 @@ const fisioterapeutasService = {
 
     const fisio = resultado.recordsets?.[0]?.[0] || null;
     if (!fisio) return null;
+
+    const fotoAtual = await obterFotoPerfilAtual(Number(id));
+    fisio.FotoPerfilDocumentoId = fotoAtual?.FotoPerfilDocumentoId ?? null;
+    fisio.FotoPerfilUrl = fotoAtual?.FotoPerfilUrl ?? null;
 
     fisio.Avaliacoes = resultado.recordsets?.[1] || [];
     fisio.Formacoes = await this.listarFormacoesFisioterapeuta(Number(id), ctx);
@@ -1220,7 +1288,16 @@ const fisioterapeutasService = {
       `
     );
 
-    return result.recordset;
+    const rows = result.recordset || [];
+    const fotosAtuais = await obterFotosPerfilAtuais(rows.map((row) => row.FisioterapeutaId ?? row.Id));
+
+    for (const row of rows) {
+      const fotoAtual = fotosAtuais.get(Number(row.FisioterapeutaId ?? row.Id));
+      row.FotoPerfilDocumentoId = fotoAtual?.FotoPerfilDocumentoId ?? null;
+      row.FotoPerfilUrl = fotoAtual?.FotoPerfilUrl ?? null;
+    }
+
+    return rows;
   },
 
   /**
@@ -2320,6 +2397,55 @@ const fisioterapeutasService = {
     };
   },
 
+  async removerFormacao(fisioterapeutaId, formacaoId, usuario = null) {
+    const ctx = safeUsuario(usuario) || { id: fisioterapeutaId, tipo: 'Fisioterapeuta' };
+
+    const fisioId = Number(fisioterapeutaId);
+    const registroId = Number(formacaoId);
+
+    if (!Number.isInteger(fisioId) || fisioId <= 0) {
+      throw new HttpError(400, 'FisioterapeutaId inválido.');
+    }
+    if (!Number.isInteger(registroId) || registroId <= 0) {
+      throw new HttpError(400, 'Id da formação inválido.');
+    }
+
+    const result = await queryWithContext(
+      ctx,
+      (req) => {
+        req.input('FormacaoId', sql.Int, registroId);
+        req.input('FisioterapeutaId', sql.Int, fisioId);
+      },
+      `
+        DELETE FROM dbo.FormacoesFisioterapeutas
+        OUTPUT DELETED.Id, DELETED.CaminhoArquivo
+        WHERE Id = @FormacaoId
+          AND FisioterapeutaId = @FisioterapeutaId;
+      `
+    );
+
+    const row = result.recordset?.[0] ?? null;
+    if (!row) {
+      throw new HttpError(404, 'Formação não encontrada para este fisioterapeuta.');
+    }
+
+    const caminhoRel = normalizarRelCertificadoFromDb(row.CaminhoArquivo);
+    if (caminhoRel) {
+      await fileStorageProvider.deleteFile(caminhoRel).catch((err) => {
+        log('warn', '[fisioterapeutas] falha ao excluir arquivo de formação', {
+          fisioterapeutaId: fisioId,
+          formacaoId: registroId,
+          caminho: caminhoRel,
+          erro: err?.message || String(err),
+        });
+      });
+    }
+
+    const thumbPath = path.resolve('uploads', 'certificados', '_thumbs', String(registroId) + '.png');
+    await fs.promises.unlink(thumbPath).catch(() => {});
+
+    return { Id: row.Id ?? registroId };
+  },
 
   // ==================
   //  FOTO DE PERFIL (Opção B)

@@ -1,9 +1,8 @@
 // 📁 controllers/videosController.js
-import fs from 'fs';
 import path from 'path';
 import videosService from '../services/videosService.js';
+import fileStorageProvider from '../providers/fileStorageProvider.js';
 
-const uploadsBase = path.resolve('uploads');
 
 function parsePositiveIntOrNull(v) {
   if (v === null || v === undefined || String(v).trim() === '') return null;
@@ -25,39 +24,8 @@ function getVideoMimeType(filePath) {
   return 'application/octet-stream';
 }
 
-async function streamVideoInline(req, res, absoluteFilePath) {
-  const stat = await fs.promises.stat(absoluteFilePath);
-  const fileSize = stat.size;
-  const range = req.headers.range;
-
-  res.setHeader('Content-Type', getVideoMimeType(absoluteFilePath));
-  res.setHeader('Content-Disposition', 'inline'); // ✅ não força download
-  res.setHeader('Accept-Ranges', 'bytes');
-  res.setHeader('Cache-Control', 'no-store');
-
-  // Suporte a Range (necessário para player <video>)
-  if (range) {
-    const parts = range.replace(/bytes=/, '').split('-');
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-
-    if (Number.isNaN(start) || Number.isNaN(end) || start > end) {
-      return res.status(416).send('Range inválido');
-    }
-
-    const chunkSize = end - start + 1;
-    res.status(206);
-    res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
-    res.setHeader('Content-Length', chunkSize);
-
-    return fs.createReadStream(absoluteFilePath, { start, end }).pipe(res);
-  }
-
-  res.setHeader('Content-Length', fileSize);
-  return fs.createReadStream(absoluteFilePath).pipe(res);
-}
-
 const videosController = {
+
   /**
    * POST /videos/me/video-bruto
    * Form-data: video=<arquivo>
@@ -75,11 +43,28 @@ const videosController = {
       }
 
       const caminhoRelativo = `videos_brutos/${req.file.filename}`;
+      let arquivoSubido = false;
 
-      const registro = await videosService.registrarVideoBruto(usuario, {
-        fisioterapeutaId: Number(usuario.id),
-        caminhoRelativo
+      await fileStorageProvider.uploadFile(caminhoRelativo, req.file.path, {
+        contentType: req.file.mimetype,
+        cacheControl: 'no-store',
       });
+      arquivoSubido = true;
+
+      let registro;
+      try {
+        registro = await videosService.registrarVideoBruto(usuario, {
+          fisioterapeutaId: Number(usuario.id),
+          caminhoRelativo
+        });
+      } catch (err) {
+        if (arquivoSubido) await fileStorageProvider.deleteFile(caminhoRelativo).catch(() => {});
+        throw err;
+      } finally {
+        if (fileStorageProvider.isAzureBlobStorageEnabled) {
+          await fileStorageProvider.cleanupLocalTempFile(req.file.path);
+        }
+      }
 
       return res.status(201).json({
         sucesso: true,
@@ -156,22 +141,28 @@ const videosController = {
         return res.status(404).json({ sucesso: false, mensagem: 'Vídeo não encontrado.' });
       }
 
-      // Normaliza e monta caminho absoluto seguro
-      const relative = String(doc.CaminhoArquivo || '').replaceAll('\\', '/'); // ex: videos_brutos/arquivo.mp4
-      const absolute = path.resolve(uploadsBase, relative);
-
-      // Proteção contra path traversal
-      if (!absolute.startsWith(uploadsBase)) {
+      let relative;
+      try {
+        relative = fileStorageProvider.normalizeStoragePath(doc.CaminhoArquivo || '');
+      } catch {
         return res.status(400).json({ sucesso: false, mensagem: 'Caminho inválido.' });
       }
 
-      try {
-        await fs.promises.access(absolute, fs.constants.F_OK);
-      } catch {
+      if (!relative.startsWith('videos_brutos/')) {
+        return res.status(400).json({ sucesso: false, mensagem: 'Caminho inválido.' });
+      }
+
+      if (!await fileStorageProvider.fileExists(relative)) {
         return res.status(404).json({ sucesso: false, mensagem: 'Arquivo não existe no servidor.' });
       }
 
-      return await streamVideoInline(req, res, absolute);
+      return fileStorageProvider.sendFile(res, relative, {
+        disposition: 'inline',
+        fileName: path.basename(relative),
+        contentType: getVideoMimeType(relative),
+        cacheControl: 'no-store',
+        rangeHeader: req.headers.range,
+      });
     } catch (err) {
       return res.status(500).json({
         sucesso: false,

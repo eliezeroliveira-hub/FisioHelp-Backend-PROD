@@ -78,6 +78,12 @@ const whatsappProviderMode = String(process.env.WHATSAPP_PROVIDER_MODE || 'stub'
 if (!['stub', 'twilio'].includes(whatsappProviderMode)) {
   throw new Error('WHATSAPP_PROVIDER_MODE inválido. Use stub ou twilio.');
 }
+
+const fileStorageProvider = String(process.env.FILE_STORAGE_PROVIDER || 'local').trim().toLowerCase();
+if (!['local', 'azure'].includes(fileStorageProvider)) {
+  throw new Error('FILE_STORAGE_PROVIDER inválido. Use local ou azure.');
+}
+
 const awsRegion = optionalEnv('AWS_REGION') || 'sa-east-1';
 const emailFrom = optionalEnv('EMAIL_FROM') || 'nao-responda@notificacoes.fisiohelp.com.br';
 const emailReplyTo = optionalEnv('EMAIL_REPLY_TO');
@@ -90,6 +96,12 @@ const twilioAuthToken = optionalEnv('TWILIO_AUTH_TOKEN');
 const twilioWhatsappFrom = optionalEnv('TWILIO_WHATSAPP_FROM') || 'whatsapp:+14155238886';
 const twilioWhatsappStatusCallbackUrl = optionalEnv('TWILIO_WHATSAPP_STATUS_CALLBACK_URL');
 const contatoPublicoDestino = optionalEnv('CONTATO_PUBLICO_DESTINO') || 'suporte@fisiohelp.com.br';
+const azureStorageConnectionString = optionalEnv('AZURE_STORAGE_CONNECTION_STRING');
+const azureStorageContainer = optionalEnv('AZURE_STORAGE_CONTAINER') || 'uploads';
+
+if (fileStorageProvider === 'azure' && !azureStorageConnectionString) {
+  throw new Error('AZURE_STORAGE_CONNECTION_STRING é obrigatório quando FILE_STORAGE_PROVIDER=azure.');
+}
 
 const refreshTokenDays = parsePositiveIntEnv('REFRESH_TOKEN_DAYS', 30);
 
@@ -156,6 +168,9 @@ export const ENV = {
   TWILIO_WHATSAPP_FROM: twilioWhatsappFrom,
   TWILIO_WHATSAPP_STATUS_CALLBACK_URL: twilioWhatsappStatusCallbackUrl,
   CONTATO_PUBLICO_DESTINO: contatoPublicoDestino,
+  FILE_STORAGE_PROVIDER: fileStorageProvider,
+  AZURE_STORAGE_CONNECTION_STRING: azureStorageConnectionString,
+  AZURE_STORAGE_CONTAINER: azureStorageContainer,
   NOTIF_WORKER_ENABLED: process.env.NOTIF_WORKER_ENABLED,
   NOTIF_WORKER_INTERVAL_MS: process.env.NOTIF_WORKER_INTERVAL_MS,
   NOTIF_WORKER_STALE_MINUTES: process.env.NOTIF_WORKER_STALE_MINUTES,

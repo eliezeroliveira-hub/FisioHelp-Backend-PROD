@@ -11,6 +11,7 @@ import crypto from 'crypto';
 import { sql } from '../config/dbConfig.js';
 import { queryWithContext } from './_queryWithContext.js';
 import notificacoesDispatch from './notificacoesDispatch.js';
+import fileStorageProvider from '../providers/fileStorageProvider.js';
 import { HttpError } from '../utils/httpError.js';
 import { agoraBrasilDate } from '../utils/appDateTime.js';
 
@@ -279,10 +280,17 @@ async function salvarAnexosChamado({ usuario, chamadoId, files = [] }) {
 
     const safeName = buildSafeFileName(file.originalname);
     const dst = path.resolve(finalDir, safeName);
-
-    await moveFileSafe(src, dst);
-
     const rel = toUploadsRelative(path.join('suporte', String(normalizedChamadoId), safeName));
+
+    if (fileStorageProvider.isAzureBlobStorageEnabled) {
+      await fileStorageProvider.uploadFile(rel, src, {
+        contentType: file.mimetype,
+        cacheControl: 'no-store',
+      });
+      await fileStorageProvider.cleanupLocalTempFile(src);
+    } else {
+      await moveFileSafe(src, dst);
+    }
 
     try {
       await queryWithContext(
@@ -302,7 +310,11 @@ async function salvarAnexosChamado({ usuario, chamadoId, files = [] }) {
         `
       );
     } catch (err) {
-      await fs.promises.unlink(dst).catch(() => {});
+      if (fileStorageProvider.isAzureBlobStorageEnabled) {
+        await fileStorageProvider.deleteFile(rel).catch(() => {});
+      } else {
+        await fs.promises.unlink(dst).catch(() => {});
+      }
       throw err;
     }
 
@@ -776,11 +788,14 @@ const suporteService = {
       throw new HttpError(404, 'Anexo do chamado não encontrado.');
     }
 
-    const caminhoArquivo = resolveUploadsAbsolutePath(row.CaminhoRelativo, 'Anexo');
-
+    let caminhoArquivo;
     try {
-      await fs.promises.access(caminhoArquivo, fs.constants.F_OK);
+      caminhoArquivo = fileStorageProvider.normalizeStoragePath(row.CaminhoRelativo);
     } catch {
+      throw new HttpError(400, 'Caminho de arquivo inválido.');
+    }
+
+    if (!await fileStorageProvider.fileExists(caminhoArquivo)) {
       throw new HttpError(404, 'Arquivo do anexo não existe no servidor.');
     }
 

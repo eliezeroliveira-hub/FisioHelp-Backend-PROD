@@ -58,6 +58,15 @@ function toBool(value) {
   return value === true || value === 1 || value === '1';
 }
 
+function normalizarFotoPerfilUrl(rawFoto) {
+  if (!rawFoto) return null;
+  const foto = String(rawFoto).trim();
+  if (!foto) return null;
+  if (foto.startsWith('/uploads/')) return foto;
+  if (/^https?:\/\//i.test(foto)) return foto;
+  return `/uploads/fotos_perfil/${foto.split(/[/\\]/).pop()}`;
+}
+
 // 🔧 Função para padronizar retorno limpo
 function filtrarRetorno(f) {
   if (!f) return null;
@@ -84,16 +93,7 @@ function filtrarRetorno(f) {
 function montarPerfilCompleto(f) {
   if (!f) return null;
 
-  //  Foto de perfil:
-  // - Se a view já devolver '/uploads/...', mantemos.
-  // - Se devolver apenas filename (ex.: 'fisio_36_....webp'), montamos '/uploads/fotos_perfil/<filename>'.
-  const rawFoto = f.FotoPerfilUrl ?? null;
-  const fotoUrl =
-    rawFoto && String(rawFoto).startsWith('/uploads/')
-      ? String(rawFoto)
-      : rawFoto
-        ? `/uploads/fotos_perfil/${String(rawFoto).split(/[/\\]/).pop()}`
-        : null;
+  const fotoUrl = normalizarFotoPerfilUrl(f.FotoPerfilUrl ?? null);
 
   return {
     FisioterapeutaId: f.FisioterapeutaId ?? f.Id,
@@ -155,6 +155,7 @@ function montarPerfilPublico(f) {
 
   return {
     ...f,
+    FotoPerfilUrl: normalizarFotoPerfilUrl(f.FotoPerfilUrl ?? null),
     CREFITO: formatarCrefito(f.CREFITO, f.Estado),
     CrefitoVerificado: toBool(f.CrefitoVerificado),
     EmailVerificado: toBool(f.EmailVerificado),
@@ -278,6 +279,7 @@ const fisioterapeutasController = {
         const { Ativo, IsBloqueado, ...publico } = f || {};
         return {
           ...publico,
+          FotoPerfilUrl: normalizarFotoPerfilUrl(publico.FotoPerfilUrl ?? null),
           CREFITO: formatarCrefito(publico.CREFITO, publico.Estado),
           CrefitoVerificado: toBool(publico.CrefitoVerificado),
           EmailVerificado: toBool(publico.EmailVerificado),
@@ -841,17 +843,19 @@ const fisioterapeutasController = {
       }
 
       const fisioId = Number(usuario.id);
-      const dirAbs = path.resolve('uploads', 'fotos_perfil');
-      fs.mkdirSync(dirAbs, { recursive: true });
-
       const ts = Date.now();
       const filename = `fisio_${fisioId}_${ts}.webp`;
-      const destinoAbs = path.join(dirAbs, filename);
+      const caminhoStorage = `fotos_perfil/${filename}`;
 
-      await sharp(req.file.buffer)
+      const buffer = await sharp(req.file.buffer)
         .resize(320, 320, { fit: 'cover', position: 'centre' })
         .webp({ quality: 85 })
-        .toFile(destinoAbs);
+        .toBuffer();
+
+      await fileStorageProvider.uploadBuffer(caminhoStorage, buffer, {
+        contentType: 'image/webp',
+        cacheControl: 'public, max-age=86400',
+      });
 
       // Para FOTO_PERFIL, salvar só o filename em CaminhoArquivo.
       const documento = await fisioterapeutasService.salvarFotoPerfil({
@@ -915,21 +919,43 @@ const fisioterapeutasController = {
         UrlCredencial: req.body.UrlCredencial || req.body.urlCredencial,
         Descricao: req.body.Descricao || req.body.descricao,};
 
-      const registro = await fisioterapeutasService.processarDocumento(
-        Number(usuario.id),
-        req.file.path,
-        formacao,
-        usuario
-      );
+      const caminhoRelativo = `certificados/${req.file.filename}`;
+      let arquivoSubido = false;
 
-      return res.json({
-        sucesso: true,
-        mensagem: 'Formação cadastrada com sucesso. O certificado ficará visível no seu perfil.',
-        caminho: (req.file?.path ? `certificados/${String(req.file.path).split(/[/\\]/).pop()}` : null),
-        formacao: registro
-      });
+      try {
+        await fileStorageProvider.uploadFile(caminhoRelativo, req.file.path, {
+          contentType: req.file.mimetype,
+          cacheControl: 'no-store',
+        });
+        arquivoSubido = true;
+
+        const registro = await fisioterapeutasService.processarDocumento(
+          Number(usuario.id),
+          caminhoRelativo,
+          formacao,
+          usuario
+        );
+
+        if (fileStorageProvider.isAzureBlobStorageEnabled) {
+          await fileStorageProvider.cleanupLocalTempFile(req.file.path);
+        }
+
+        return res.json({
+          sucesso: true,
+          mensagem: 'Formação cadastrada com sucesso. O certificado ficará visível no seu perfil.',
+          caminho: caminhoRelativo,
+          formacao: registro
+        });
+      } catch (err) {
+        if (arquivoSubido) await fileStorageProvider.deleteFile(caminhoRelativo).catch(() => {});
+        if (fileStorageProvider.isAzureBlobStorageEnabled) {
+          await fileStorageProvider.cleanupLocalTempFile(req.file.path);
+        }
+        throw err;
+      }
     } catch (erro) {
-      return res.status(500).json({ erro: 'Erro interno do servidor.' });
+      const status = erro?.statusCode || erro?.httpStatus || 500;
+      return res.status(status).json({ erro: status >= 500 ? 'Erro interno do servidor.' : erro.message });
     }
   },
 
@@ -976,6 +1002,35 @@ const fisioterapeutasController = {
       return res.json({
         sucesso: true,
         mensagem: 'Formação atualizada com sucesso.',
+        formacao: registro,
+      });
+    } catch (erro) {
+      return handleError(res, erro);
+    }
+  },
+  async removerFormacao(req, res) {
+    try {
+      const usuario = req.usuario;
+
+      if (!isAuth(usuario)) return res.status(401).json({ erro: 'Não autenticado.' });
+      if (!isFisio(usuario)) return res.status(403).json({ erro: 'Acesso negado.' });
+
+      const fisioterapeutaId = Number(usuario.id);
+      const formacaoId = Number(req.params.id);
+
+      if (!Number.isInteger(formacaoId) || formacaoId <= 0) {
+        return res.status(400).json({ erro: 'Id da formação inválido.' });
+      }
+
+      const registro = await fisioterapeutasService.removerFormacao(
+        fisioterapeutaId,
+        formacaoId,
+        usuario
+      );
+
+      return res.json({
+        sucesso: true,
+        mensagem: 'Formação removida com sucesso.',
         formacao: registro,
       });
     } catch (erro) {

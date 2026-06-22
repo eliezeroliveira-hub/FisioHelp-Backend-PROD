@@ -1,11 +1,11 @@
 //  services/adminService.js
 import { sql } from '../config/dbConfig.js';
-import fs from 'fs';
 import path from 'path';
 import { queryWithContext } from './_queryWithContext.js';
 import notificacoesDispatch from './notificacoesDispatch.js';
 import { HttpError } from '../utils/httpError.js';
 import { normalizeCNPJ } from '../utils/identityValidators.js';
+import fileStorageProvider from '../providers/fileStorageProvider.js';
 
 const YOUTUBE_RE = /^https?:\/\/(www\.)?(youtube\.com\/(watch\?v=|embed\/|shorts\/)|youtu\.be\/).+/i;
 const STATUS_DOCUMENTO_VALIDOS = new Set(['Aprovado', 'Reprovado', 'Pendente']);
@@ -634,30 +634,21 @@ const adminService = {
       throw new HttpError(404, 'Documento não possui caminho de arquivo.');
     }
 
-    const uploadsRoot = path.resolve('uploads');
-    if (path.isAbsolute(caminho)) {
-      throw new HttpError(400, 'Caminho absoluto não é permitido. Use caminho relativo em uploads/.');
-    }
-
-    // Normaliza barras, remove barras iniciais e eventual prefixo "uploads/"
-    const relativo = caminho
-      .replace(/^[\\/]+/, '')
-      .replace(/\\/g, '/')
-      .replace(/^uploads\//i, '');
-
-    const caminhoFisico = path.resolve(uploadsRoot, relativo);
-    const relativoParaRoot = path.relative(uploadsRoot, caminhoFisico);
-    if (relativoParaRoot.startsWith('..') || path.isAbsolute(relativoParaRoot)) {
+    let relativo;
+    try {
+      relativo = fileStorageProvider.normalizeStoragePath(caminho);
+    } catch {
       throw new HttpError(400, 'Caminho de arquivo inválido.');
     }
 
-    try {
-      await fs.promises.access(caminhoFisico, fs.constants.F_OK);
-    } catch {
+    if (!await fileStorageProvider.fileExists(relativo)) {
       throw new HttpError(404, 'Arquivo não existe no servidor.');
     }
 
-    return caminhoFisico;
+    return {
+      caminhoArquivo: relativo,
+      nomeArquivo: path.basename(relativo),
+    };
   },
 
   // -------------------------------------------------------------
