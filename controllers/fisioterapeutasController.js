@@ -5,6 +5,7 @@ import { HttpError } from '../utils/httpError.js';
 import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
+import fileStorageProvider from '../providers/fileStorageProvider.js';
 
 // Helpers
 const asTipo = (u) => String(u?.tipo || '').toLowerCase();
