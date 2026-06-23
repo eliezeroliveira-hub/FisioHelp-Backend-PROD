@@ -374,7 +374,7 @@ const chatService = {
    * - conteudo (obrigatório, a menos que documentoPacienteId seja informado)
    * - documentoPacienteId (opcional) => manda “card de documento” via JSON no Conteudo
    */
-  async enviarMensagem(usuario, payload = {}) {
+  async enviarMensagem(usuario, payload = {}, options = {}) {
     assertUser(usuario);
     if (isAdmin(usuario)) throw new HttpError(403, 'Admin não envia mensagens pelo chat (MVP).');
 
@@ -385,10 +385,12 @@ const chatService = {
 
     const conteudo = payload.conteudo ?? payload.Conteudo ?? payload.mensagem ?? payload.Mensagem ?? null;
     const documentoPacienteId = payload.documentoPacienteId ?? payload.DocumentoPacienteId ?? null;
+    const enviandoDocumento = documentoPacienteId !== undefined && documentoPacienteId !== null;
+    const permitirDocumentoAntesLiberacao = options?.permitirDocumentoAntesLiberacao === true;
 
     const consulta = await getConsultaOrThrow(usuario, consultaId);
 
-    if (!consulta.ChatLiberado) {
+    if (!consulta.ChatLiberado && !(enviandoDocumento && permitirDocumentoAntesLiberacao)) {
       throw new HttpError(409, 'Chat ainda não está liberado para esta consulta.');
     }
 
@@ -412,8 +414,6 @@ const chatService = {
 
     // sanity (evita token com id inconsistente)
     if (remetenteId !== uid) throw new HttpError(403, 'Acesso negado.');
-
-    const enviandoDocumento = documentoPacienteId !== undefined && documentoPacienteId !== null;
 
     let conteudoFinal = normalizeText(conteudo, 8000);
 
@@ -493,12 +493,17 @@ const chatService = {
     );
 
     const msgId = insert.recordset?.[0]?.Id;
-    void notificacoesDispatch.chatNovaMensagem({
-      consultaId: Number(consulta.Id),
-      mensagemId: msgId,
-      remetenteTipo: tipoRemetente,
-      conteudo: conteudoFinal
-    });
+    // Pedido medico pode ser anexado enquanto a consulta ainda esta aguardando.
+    // Nesse caso registramos a mensagem para ela aparecer quando o chat for liberado,
+    // mas nao disparamos notificacao de "nova mensagem" antes da conversa existir para o usuario.
+    if (consulta.ChatLiberado) {
+      void notificacoesDispatch.chatNovaMensagem({
+        consultaId: Number(consulta.Id),
+        mensagemId: msgId,
+        remetenteTipo: tipoRemetente,
+        conteudo: conteudoFinal
+      });
+    }
 
     return { sucesso: true, mensagemId: msgId };
   },
@@ -508,7 +513,11 @@ const chatService = {
    * Ela cria a mensagem automática na conversa.
    */
   async notificarDocumentoPacienteEnviado(usuario, { consultaId, documentoPacienteId }) {
-    return this.enviarMensagem(usuario, { consultaId, documentoPacienteId });
+    return this.enviarMensagem(
+      usuario,
+      { consultaId, documentoPacienteId },
+      { permitirDocumentoAntesLiberacao: true }
+    );
   }
 };
 
