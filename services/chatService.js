@@ -184,11 +184,17 @@ async function getConsultaOrThrow(usuario, consultaId) {
   return consulta;
 }
 
+function descricaoDocumentoChat(tipoDocumento) {
+  const tipo = String(tipoDocumento || '').trim().toLowerCase();
+  if (tipo === 'autorizacaoatendimento') return 'um pedido médico';
+  return 'um documento';
+}
+
 function buildDocumentoMensagemPayload({ documentoPacienteId, tipoDocumento }) {
   // Conteudo em JSON (MVP) para o app conseguir renderizar “card de documento”
   return JSON.stringify({
     tipo: 'documento',
-    texto: `Paciente enviou ${tipoDocumento || 'um documento'} para esta consulta.`,
+    texto: `Paciente enviou ${descricaoDocumentoChat(tipoDocumento)} para esta consulta.`,
     documentoPacienteId
   });
 }

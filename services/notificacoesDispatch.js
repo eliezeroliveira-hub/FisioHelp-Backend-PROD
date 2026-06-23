@@ -61,7 +61,14 @@ function trechoMensagem(value) {
 
   try {
     const parsed = JSON.parse(raw);
-    if (parsed?.tipo === 'documentoPaciente') return 'enviou um documento.';
+    if (parsed?.tipo === 'documento' || parsed?.tipo === 'documentoPaciente') {
+      const textoDoc = String(parsed?.texto ?? '').trim();
+      const tipoDoc = String(parsed?.tipoDocumento ?? parsed?.TipoDocumento ?? '').trim();
+      if (/autorizacaoatendimento|pedido medico|pedido médico/i.test(`${textoDoc} ${tipoDoc}`)) {
+        return 'enviou um pedido médico.';
+      }
+      return 'enviou um documento.';
+    }
   } catch {
     // Mensagem comum, segue abaixo.
   }
