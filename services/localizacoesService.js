@@ -2,6 +2,7 @@
 import { sql } from '../config/dbConfig.js';
 import { queryWithContext } from './_queryWithContext.js';
 import { HttpError } from '../utils/httpError.js';
+import { agoraBrasilDate } from '../utils/appDateTime.js';
 
 function asFiniteNumber(v, label) {
   const n = typeof v === 'string' ? Number(v.replace(',', '.')) : Number(v);
@@ -47,59 +48,76 @@ const localizacoesService = {
     }
 
     const raio = assertRaioKm(raioAtendimentoKm, 'raioAtendimentoKm');
+    const contexto = { id: usuarioId, tipo: usuarioTipo };
 
     const sqlText = `
-      MERGE dbo.Localizacoes AS tgt
-      USING (SELECT @FisioterapeutaId AS FisioterapeutaId) AS src
-      ON tgt.FisioterapeutaId = src.FisioterapeutaId
-      WHEN MATCHED THEN
-        UPDATE SET
-          RaioAtendimentoKm = @Raio,
-          Cidade = @Cidade,
-          Estado = @Estado,
-          CEP = @Cep,
-          Logradouro = @Logradouro,
-          Numero = @Numero,
-          Latitude = CASE WHEN @Lat IS NOT NULL THEN @Lat ELSE tgt.Latitude END,
-          Longitude = CASE WHEN @Lon IS NOT NULL THEN @Lon ELSE tgt.Longitude END,
-          GeoLocalizacao = CASE
-            WHEN @Lat IS NOT NULL AND @Lon IS NOT NULL THEN geography::Point(@Lat, @Lon, 4326)
-            ELSE tgt.GeoLocalizacao
-          END,
-          AtualizadoEm = SYSDATETIME()
-      WHEN NOT MATCHED THEN
-        INSERT (FisioterapeutaId, Latitude, Longitude, RaioAtendimentoKm, Cidade, Estado, CEP, Logradouro, Numero, GeoLocalizacao, AtualizadoEm)
-        VALUES (
-          @FisioterapeutaId,
-          @Lat,
-          @Lon,
-          @Raio,
-          @Cidade,
-          @Estado,
-          @Cep,
-          @Logradouro,
-          @Numero,
-          CASE
-            WHEN @Lat IS NOT NULL AND @Lon IS NOT NULL THEN geography::Point(@Lat, @Lon, 4326)
-            ELSE NULL
-          END,
-          SYSDATETIME()
-        )
-      OUTPUT
-        inserted.FisioterapeutaId,
-        inserted.Latitude,
-        inserted.Longitude,
-        inserted.RaioAtendimentoKm,
-        inserted.Cidade,
-        inserted.Estado,
-        inserted.CEP,
-        inserted.Logradouro,
-        inserted.Numero,
-        inserted.AtualizadoEm;
+      SET XACT_ABORT ON;
+
+      BEGIN TRY
+        BEGIN TRAN;
+
+        UPDATE dbo.Localizacoes WITH (UPDLOCK, HOLDLOCK)
+          SET
+            RaioAtendimentoKm = @Raio,
+            Cidade = @Cidade,
+            Estado = @Estado,
+            CEP = @Cep,
+            Logradouro = @Logradouro,
+            Numero = @Numero,
+            Latitude = CASE WHEN @Lat IS NOT NULL THEN @Lat ELSE Latitude END,
+            Longitude = CASE WHEN @Lon IS NOT NULL THEN @Lon ELSE Longitude END,
+            GeoLocalizacao = CASE
+              WHEN @Lat IS NOT NULL AND @Lon IS NOT NULL THEN geography::Point(@Lat, @Lon, 4326)
+              ELSE GeoLocalizacao
+            END,
+            AtualizadoEm = @AgoraBrasil
+        WHERE FisioterapeutaId = @FisioterapeutaId;
+
+        IF @@ROWCOUNT = 0
+        BEGIN
+          INSERT INTO dbo.Localizacoes (FisioterapeutaId, Latitude, Longitude, RaioAtendimentoKm, Cidade, Estado, CEP, Logradouro, Numero, GeoLocalizacao, AtualizadoEm)
+          VALUES (
+            @FisioterapeutaId,
+            @Lat,
+            @Lon,
+            @Raio,
+            @Cidade,
+            @Estado,
+            @Cep,
+            @Logradouro,
+            @Numero,
+            CASE
+              WHEN @Lat IS NOT NULL AND @Lon IS NOT NULL THEN geography::Point(@Lat, @Lon, 4326)
+              ELSE NULL
+            END,
+            @AgoraBrasil
+          );
+        END;
+
+        SELECT TOP 1
+          FisioterapeutaId,
+          Latitude,
+          Longitude,
+          RaioAtendimentoKm,
+          Cidade,
+          Estado,
+          CEP,
+          Logradouro,
+          Numero,
+          AtualizadoEm
+        FROM dbo.Localizacoes
+        WHERE FisioterapeutaId = @FisioterapeutaId;
+
+        COMMIT;
+      END TRY
+      BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK;
+        ;THROW;
+      END CATCH;
     `;
 
     const result = await queryWithContext(
-      { usuarioTipo, usuarioId },
+      contexto,
       (req) => {
         req.input('FisioterapeutaId', sql.Int, usuarioId);
         req.input('Lat', sql.Decimal(9, 6), lat);
@@ -110,14 +128,17 @@ const localizacoesService = {
         req.input('Cep', sql.NVarChar(9), cep ?? null);
         req.input('Logradouro', sql.NVarChar(400), logradouro ?? null);
         req.input('Numero', sql.NVarChar(20), numero ?? null);
+        req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
       },
-      sqlText
+      sqlText,
+      { requireContext: true }
     );
 
     return result?.recordset?.[0] ?? null;
   },
 
   async obterMinhaLocalizacao({ usuarioTipo, usuarioId }) {
+    const contexto = { id: usuarioId, tipo: usuarioTipo };
     const sqlText = `
       SELECT TOP 1
         FisioterapeutaId,
@@ -135,11 +156,12 @@ const localizacoesService = {
     `;
 
     const result = await queryWithContext(
-      { usuarioTipo, usuarioId },
+      contexto,
       (req) => {
         req.input('FisioterapeutaId', sql.Int, usuarioId);
       },
-      sqlText
+      sqlText,
+      { requireContext: true }
     );
 
     return result?.recordset?.[0] ?? null;
@@ -150,6 +172,7 @@ const localizacoesService = {
     const { lat: latNum, lon: lonNum } = assertLatLon(lat, lon);
     const raio = assertRaioKm(raioBuscaKm, 'raioBuscaKm');
     const paginacao = normalizePaginacao(limit, offset);
+    const contexto = { id: usuarioId, tipo: usuarioTipo };
 
     const sqlText = `
       DECLARE @Ponto geography = geography::Point(@LatPaciente, @LonPaciente, 4326);
@@ -203,7 +226,7 @@ const localizacoesService = {
     `;
 
     const result = await queryWithContext(
-      { usuarioTipo, usuarioId },
+      contexto,
       (req) => {
         req.input('LatPaciente', sql.Decimal(9, 6), latNum);
         req.input('LonPaciente', sql.Decimal(9, 6), lonNum);
@@ -211,7 +234,8 @@ const localizacoesService = {
         req.input('Offset', sql.Int, paginacao.offset);
         req.input('Limit', sql.Int, paginacao.limit);
       },
-      sqlText
+      sqlText,
+      { requireContext: true }
     );
 
     return {
@@ -224,3 +248,5 @@ const localizacoesService = {
 };
 
 export default localizacoesService;
+
+
