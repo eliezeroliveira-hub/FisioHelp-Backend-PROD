@@ -4,6 +4,7 @@ import { queryWithContext } from './_queryWithContext.js';
 import PDFDocument from 'pdfkit';
 import { HttpError } from '../utils/httpError.js';
 import { createHash } from 'crypto';
+import { agoraBrasilDate } from '../utils/appDateTime.js';
 
 function isFisio(usuario) {
   return String(usuario?.tipo || '').toLowerCase() === 'fisioterapeuta';
@@ -334,12 +335,13 @@ async function sincronizarCamposAutomaticosDoProntuario(usuario, prontuario) {
     (req) => {
       req.input('Id', sql.Int, prontuario.Id);
       req.input('FisioterapeutaId', sql.Int, Number(usuario.id));
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
       for (const p of inputs) req.input(p.name, p.type, p.value);
     },
     `
     UPDATE dbo.Prontuarios
     SET ${updates.join(', ')},
-        DataUltimaAtualizacao = SYSDATETIME()
+        DataUltimaAtualizacao = @AgoraBrasil
     WHERE Id = @Id
       AND FisioterapeutaId = @FisioterapeutaId;
 
@@ -430,6 +432,7 @@ const prontuariosService = {
 
         req.input('ProfissionalNome', sql.NVarChar(600), snap.ProfissionalNome ?? null);
         req.input('ProfissionalCrefito', sql.NVarChar(60), snap.ProfissionalCrefito ?? null);
+        req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
       },
       `
       SET NOCOUNT ON;
@@ -465,7 +468,7 @@ const prontuariosService = {
           @PacienteLocalNascimento, @PacienteProfissao, @PacienteCep,
           @PacienteEnderecoResidencial, @PacienteEnderecoComercial,
           @ProfissionalNome, @ProfissionalCrefito,
-          SYSDATETIME()
+          @AgoraBrasil
         );
 
         DECLARE @NewId INT = CAST(SCOPE_IDENTITY() AS INT);
@@ -602,6 +605,7 @@ const prontuariosService = {
 
           req.input('DataCriacao', sql.DateTime, snap.ProntuarioDataCriacao ?? null);
           req.input('DataRegistroProcedimentos', sql.DateTime2, snap.DataRegistroProcedimentos ?? null);
+          req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
         },
         `
         INSERT INTO dbo.Prontuarios (
@@ -657,7 +661,7 @@ const prontuariosService = {
           @PlanoTerapeutico,
 
           @DataCriacao,
-          SYSDATETIME(),
+          @AgoraBrasil,
 
           @PacienteNomeCompleto,
           @PacienteNaturalidade,
@@ -825,10 +829,10 @@ const prontuariosService = {
   let dataEvoFinal = dataEvo;
   const ensureDataEvoFinal = () => {
     if (!dataEvoFinal) {
-      const hoje = new Date();
-      const yyyy = hoje.getFullYear();
-      const mm = String(hoje.getMonth() + 1).padStart(2, '0');
-      const dd = String(hoje.getDate()).padStart(2, '0');
+      const hoje = agoraBrasilDate();
+      const yyyy = hoje.getUTCFullYear();
+      const mm = String(hoje.getUTCMonth() + 1).padStart(2, '0');
+      const dd = String(hoje.getUTCDate()).padStart(2, '0');
       dataEvoFinal = `${yyyy}-${mm}-${dd}`;
     }
     return dataEvoFinal;
@@ -1007,12 +1011,13 @@ const prontuariosService = {
     (req) => {
       req.input('Id', sql.Int, existente.Id);
       req.input('FisioterapeutaId', sql.Int, Number(usuario.id));
+      req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
       for (const i of inputs) req.input(i.k, i.t, i.v);
     },
     `
     UPDATE dbo.Prontuarios
     SET ${sets.join(', ')},
-        DataUltimaAtualizacao = SYSDATETIME()
+        DataUltimaAtualizacao = @AgoraBrasil
     WHERE Id = @Id AND FisioterapeutaId = @FisioterapeutaId;
 
     SELECT TOP 1 *
@@ -1062,7 +1067,8 @@ async assinar(usuario, pacienteId, { ip = null } = {}) {
   const ipNorm = ip ? String(ip).trim().slice(0, 120) : null;
   const fisioId = Number(usuario.id);
 
-  const agora = new Date();
+  const agoraReal = new Date();
+  const agoraBrasil = agoraBrasilDate(agoraReal);
   const formatter = new Intl.DateTimeFormat('pt-BR', {
     timeZone: 'America/Sao_Paulo',
     day: '2-digit',
@@ -1071,7 +1077,7 @@ async assinar(usuario, pacienteId, { ip = null } = {}) {
     hour: '2-digit',
     minute: '2-digit',
   });
-  const dataFormatada = formatter.format(agora).replace(',', '');
+  const dataFormatada = formatter.format(agoraReal).replace(',', '');
   const textoAssinatura = `${prontuario.ProfissionalNome ?? ''} - CREFITO ${prontuario.ProfissionalCrefito ?? ''} - ${dataFormatada}`.trim();
 
   const result = await queryWithContext(usuario, (req) => {
@@ -1081,15 +1087,16 @@ async assinar(usuario, pacienteId, { ip = null } = {}) {
     req.input('HashConteudo', sql.NVarChar(64), hash);
     req.input('IpAssinatura', sql.NVarChar(120), ipNorm);
     req.input('ProfissionalAssinatura', sql.NVarChar(800), textoAssinatura);
+    req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasil);
   }, `
     UPDATE dbo.Prontuarios
     SET
-      AssinadoEm = SYSDATETIME(),
+      AssinadoEm = @AgoraBrasil,
       AssinadoPorId = @AssinadoPorId,
       HashConteudo = @HashConteudo,
       IpAssinatura = @IpAssinatura,
       ProfissionalAssinatura = @ProfissionalAssinatura,
-      DataUltimaAtualizacao = SYSDATETIME()
+      DataUltimaAtualizacao = @AgoraBrasil
     WHERE Id = @Id
       AND FisioterapeutaId = @FisioterapeutaId;
 
