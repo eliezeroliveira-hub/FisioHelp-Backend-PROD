@@ -332,7 +332,7 @@ const adminService = {
           aa.Ip,
           aa.UserAgent,
           aa.CorrelationId,
-          aa.CriadoEm,
+          CAST(aa.CriadoEm AT TIME ZONE 'UTC' AT TIME ZONE 'E. South America Standard Time' AS DATETIME2(7)) AS CriadoEm,
           COUNT(*) OVER() AS Total
         FROM dbo.AuditoriaAcoesAdmin aa
         LEFT JOIN dbo.Administradores adm ON adm.Id = aa.AdminId
