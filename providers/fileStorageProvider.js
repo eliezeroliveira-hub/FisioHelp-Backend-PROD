@@ -82,6 +82,8 @@ function contentTypeFromPath(filePath) {
   if (ext === '.png') return 'image/png';
   if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
   if (ext === '.webp') return 'image/webp';
+  if (ext === '.heic') return 'image/heic';
+  if (ext === '.heif') return 'image/heif';
   if (ext === '.mp4') return 'video/mp4';
   if (ext === '.mov') return 'video/quicktime';
   if (ext === '.webm') return 'video/webm';

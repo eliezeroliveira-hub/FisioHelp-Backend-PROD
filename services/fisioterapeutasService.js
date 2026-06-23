@@ -25,6 +25,7 @@ import {
 } from '../utils/identityValidators.js';
 import { validatePasswordStrength } from '../utils/passwordPolicy.js';
 import fileStorageProvider from '../providers/fileStorageProvider.js';
+import { getHeicPreviewRelativePath, isHeicStoragePath } from '../utils/heicPreview.js';
 
 const APP_TIME_ZONE = 'America/Sao_Paulo';
 const CNPJ_ALFANUMERICO_REPASSE_MSG =
@@ -2439,6 +2440,15 @@ const fisioterapeutasService = {
           erro: err?.message || String(err),
         });
       });
+    }
+
+
+    try {
+      if (isHeicStoragePath(caminhoRel)) {
+        await fileStorageProvider.deleteFile(getHeicPreviewRelativePath(caminhoRel)).catch(() => {});
+      }
+    } catch {
+      // Best-effort: preview HEIC é artefato derivado e não deve bloquear a exclusão lógica.
     }
 
     const thumbPath = path.resolve('uploads', 'certificados', '_thumbs', String(registroId) + '.png');

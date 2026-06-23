@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
 import fileStorageProvider from '../providers/fileStorageProvider.js';
+import { createHeicPreviewFromFile, getHeicPreviewRelativePath, isHeicStoragePath } from '../utils/heicPreview.js';
 
 // Helpers
 const asTipo = (u) => String(u?.tipo || '').toLowerCase();
@@ -922,6 +923,7 @@ const fisioterapeutasController = {
 
       const caminhoRelativo = `certificados/${req.file.filename}`;
       let arquivoSubido = false;
+      let previewHeicSubido = false;
 
       try {
         await fileStorageProvider.uploadFile(caminhoRelativo, req.file.path, {
@@ -929,6 +931,23 @@ const fisioterapeutasController = {
           cacheControl: 'no-store',
         });
         arquivoSubido = true;
+
+
+        if (isHeicStoragePath(caminhoRelativo)) {
+          try {
+            await createHeicPreviewFromFile({
+              sourceFilePath: req.file.path,
+              sourceRelativePath: caminhoRelativo,
+            });
+            previewHeicSubido = true;
+          } catch (err) {
+            console.warn('[fisioterapeutas] falha ao gerar preview HEIC do certificado', {
+              fisioterapeutaId: usuario.id,
+              caminho: caminhoRelativo,
+              erro: err?.message || String(err),
+            });
+          }
+        }
 
         const registro = await fisioterapeutasService.processarDocumento(
           Number(usuario.id),
@@ -949,6 +968,9 @@ const fisioterapeutasController = {
         });
       } catch (err) {
         if (arquivoSubido) await fileStorageProvider.deleteFile(caminhoRelativo).catch(() => {});
+        if (previewHeicSubido) {
+          await fileStorageProvider.deleteFile(getHeicPreviewRelativePath(caminhoRelativo)).catch(() => {});
+        }
         if (fileStorageProvider.isAzureBlobStorageEnabled) {
           await fileStorageProvider.cleanupLocalTempFile(req.file.path);
         }

@@ -9,6 +9,7 @@ import { queryWithContext } from '../services/_queryWithContext.js';
 import chatService from '../services/chatService.js';
 import pacientesService from '../services/pacientesService.js';
 import fileStorageProvider from '../providers/fileStorageProvider.js';
+import { ensureHeicPreview, isHeicStoragePath } from '../utils/heicPreview.js';
 
 const uploadsBase = path.resolve('uploads');
 const certificadosBase = path.resolve(uploadsBase, 'certificados');
@@ -392,6 +393,23 @@ const arquivosController = {
       } catch (e) {
         return res.status(400).json({ sucesso: false, erro: e.message });
       }
+      if (isHeicStoragePath(rel)) {
+        const previewRel = await ensureHeicPreview({ sourceRelativePath: rel });
+        if (!previewRel) {
+          return res.status(404).json({
+            sucesso: false,
+            erro: 'Visualização indisponível para este arquivo HEIC.'
+          });
+        }
+
+        return fileStorageProvider.sendFile(res, previewRel, {
+          disposition: 'inline',
+          fileName: path.basename(previewRel),
+          contentType: 'image/jpeg',
+          cacheControl: 'no-store',
+          rangeHeader: req.headers.range,
+        });
+      }
 
       // ✅ inline (não força download)
       return fileStorageProvider.sendFile(res, rel, {
@@ -528,11 +546,28 @@ const arquivosController = {
       if (!await fileStorageProvider.fileExists(rel)) {
         return res.status(404).json({ sucesso: false, erro: 'Arquivo não existe no servidor.' });
       }
-
       const lowerPath = rel.toLowerCase();
       const isPdf = lowerPath.endsWith('.pdf');
-      const isImage = ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif']
+      const isHeic = isHeicStoragePath(rel);
+      const isImage = ['.jpg', '.jpeg', '.png', '.webp']
         .some((ext) => lowerPath.endsWith(ext));
+
+      if (isHeic) {
+        const previewRel = await ensureHeicPreview({ sourceRelativePath: rel });
+        if (!previewRel) {
+          return res.status(404).json({
+            sucesso: false,
+            erro: 'Thumbnail indisponível para este arquivo HEIC.'
+          });
+        }
+
+        return fileStorageProvider.sendFile(res, previewRel, {
+          disposition: 'inline',
+          fileName: path.basename(previewRel),
+          contentType: 'image/jpeg',
+          cacheControl: 'no-store',
+        });
+      }
 
       if (isImage) {
         return fileStorageProvider.sendFile(res, rel, {
