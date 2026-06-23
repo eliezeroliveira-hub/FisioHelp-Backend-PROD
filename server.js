@@ -121,6 +121,10 @@ if (trustProxyRaw !== undefined) {
 
 // 🌍 Configuração
 app.use(helmet());
+// Arquivos públicos precisam ser embutíveis por site/admin em outra origem.
+// O restante da API mantém Cross-Origin-Resource-Policy: same-origin via helmet global.
+app.use('/uploads', helmet.crossOriginResourcePolicy({ policy: 'cross-origin' }));
+app.use('/api/arquivos/certificados', helmet.crossOriginResourcePolicy({ policy: 'cross-origin' }));
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '2mb' })); // limite de payload JSON (uploads são via multipart)
 app.use(compression());
@@ -202,5 +206,4 @@ app.listen(ENV.PORT, () => {
   startAvaliacoesPendentesWorker();
   startConsultasLembretesWorker();
 });
-
 
