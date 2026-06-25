@@ -1,4 +1,5 @@
 import rateLimit from 'express-rate-limit';
+import { rateLimitKeyByIp } from '../utils/clientIp.js';
 
 function parsePositiveInt(raw, fallback) {
   const n = Number(raw);
@@ -13,7 +14,9 @@ export const refreshLimiter = rateLimit({
   max,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: rateLimitKeyByIp,
   message: { erro: 'Muitas tentativas de renovação de token. Tente novamente em instantes.' }
 });
 
 export default refreshLimiter;
+

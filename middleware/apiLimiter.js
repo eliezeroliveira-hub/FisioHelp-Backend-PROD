@@ -1,4 +1,5 @@
 import rateLimit from 'express-rate-limit';
+import { rateLimitKeyByIp } from '../utils/clientIp.js';
 
 function parsePositiveInt(raw, fallback) {
   const n = Number(raw);
@@ -27,6 +28,7 @@ export const apiLimiter = rateLimit({
   max,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: rateLimitKeyByIp,
   message: { erro: 'Muitas requisições. Tente novamente em alguns minutos.' },
   // Webhook pode receber bursts do provedor e não deve competir com limite global.
   skip: (req) =>
@@ -43,6 +45,7 @@ export const pagamentosWebhookLimiter = rateLimit({
   max: pagamentosWebhookMax,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: rateLimitKeyByIp,
   message: { erro: 'Muitas notificações recebidas. Tente novamente em instantes.' }
 });
 
@@ -51,6 +54,7 @@ export const emailWebhookLimiter = rateLimit({
   max: emailWebhookMax,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: rateLimitKeyByIp,
   message: { erro: 'Muitos eventos de e-mail recebidos. Tente novamente em instantes.' }
 });
 
@@ -59,6 +63,7 @@ export const twilioWhatsappWebhookLimiter = rateLimit({
   max: twilioWhatsappWebhookMax,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: rateLimitKeyByIp,
   message: { erro: 'Muitos eventos de WhatsApp recebidos. Tente novamente em instantes.' }
 });
 
@@ -67,6 +72,7 @@ export const contatoPublicoIpLimiter = rateLimit({
   max: contatoPublicoMax,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: rateLimitKeyByIp,
   message: { erro: 'Muitas mensagens enviadas. Tente novamente em alguns minutos.' }
 });
 
@@ -80,3 +86,4 @@ export const contatoPublicoEmailLimiter = rateLimit({
 });
 
 export default apiLimiter;
+

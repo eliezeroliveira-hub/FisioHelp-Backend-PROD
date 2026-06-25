@@ -1,4 +1,5 @@
 import rateLimit from 'express-rate-limit';
+import { rateLimitKeyByIp } from '../utils/clientIp.js';
 
 const quinzeMinutos = 15 * 60 * 1000;
 
@@ -14,6 +15,7 @@ export const forgotPasswordRequestLimiter = rateLimit({
   max: Number(process.env.FORGOT_PASSWORD_REQUEST_LIMIT || 3),
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: rateLimitKeyByIp,
   message: message(Number(process.env.FORGOT_PASSWORD_REQUEST_LIMIT || 3)),
 });
 
@@ -22,6 +24,7 @@ export const forgotPasswordConfirmLimiter = rateLimit({
   max: Number(process.env.FORGOT_PASSWORD_CONFIRM_LIMIT || 10),
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: rateLimitKeyByIp,
   message: message(Number(process.env.FORGOT_PASSWORD_CONFIRM_LIMIT || 10)),
 });
 
@@ -30,5 +33,7 @@ export const forgotPasswordResetLimiter = rateLimit({
   max: Number(process.env.FORGOT_PASSWORD_RESET_LIMIT || 5),
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: rateLimitKeyByIp,
   message: message(Number(process.env.FORGOT_PASSWORD_RESET_LIMIT || 5)),
 });
+

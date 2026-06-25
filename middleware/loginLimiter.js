@@ -1,5 +1,6 @@
 // middleware/loginLimiter.js
 import { log } from '../config/logger.js';
+import { getClientIp } from '../utils/clientIp.js';
 
 const WINDOW_MS = 15 * 60 * 1000;
 const MAX_ATTEMPTS = 10;
@@ -22,12 +23,6 @@ let redisClient = null;
 let redisInitPromise = null;
 let redisWarned = false;
 
-function getClientIp(req) {
-  // Prioriza req.ip (Express + trust proxy), evitando confiar diretamente em header forjado.
-  const ip = typeof req?.ip === 'string' ? req.ip.trim() : '';
-  if (ip) return ip;
-  return req?.socket?.remoteAddress || 'unknown';
-}
 
 function normalizeIdentifier(req) {
   const body = req?.body || {};
@@ -237,3 +232,4 @@ export async function loginLimiter(req, res, next) {
   }
   return loginLimiterMemory(req, res, next);
 }
+
