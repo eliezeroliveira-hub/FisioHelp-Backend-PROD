@@ -174,17 +174,20 @@ const authController = {
    * Login OAuth (Google / Apple)
    */
   async loginOAuth(req, res) {
-    const { provedor, id_token } = req.body || {};
+    const { provedor, id_token, nonce } = req.body || {};
     if (!provedor || !id_token) {
       return res.status(400).json({ erro: 'Provedor ou token ausente.' });
+    }
+    if (!String(nonce || '').trim()) {
+      return res.status(400).json({ erro: 'Nonce OAuth ausente.' });
     }
 
     try {
       const prov = String(provedor).toLowerCase().trim();
 
       let dadosOAuth;
-      if (prov === 'google') dadosOAuth = await validarGoogleToken(id_token);
-      else if (prov === 'apple') dadosOAuth = await validarAppleToken(id_token);
+      if (prov === 'google') dadosOAuth = await validarGoogleToken(id_token, nonce);
+      else if (prov === 'apple') dadosOAuth = await validarAppleToken(id_token, nonce);
       else return res.status(400).json({ erro: 'Provedor OAuth inválido.' });
 
       if (!dadosOAuth?.email) {

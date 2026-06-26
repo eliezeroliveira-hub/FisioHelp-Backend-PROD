@@ -5,35 +5,63 @@ import { ENV } from "../config/env.js";
 import { log } from "../config/logger.js";
 
 let googleClient = null;
-let googleClientAudience = null;
 
-function getGoogleClient(audience) {
-  if (!googleClient || googleClientAudience !== audience) {
-    googleClient = new OAuth2Client(audience);
-    googleClientAudience = audience;
+function getGoogleClient() {
+  if (!googleClient) {
+    googleClient = new OAuth2Client();
   }
   return googleClient;
 }
 
-export async function validarGoogleToken(idToken) {
+function splitOAuthAudiences(value) {
+  return String(value || '')
+    .split(/[\s,;]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function getGoogleAudiences() {
+  return Array.from(new Set([
+    ...splitOAuthAudiences(ENV.GOOGLE_CLIENT_ID),
+    ...splitOAuthAudiences(ENV.GOOGLE_CLIENT_IDS),
+  ]));
+}
+
+function normalizeExpectedNonce(value) {
+  const nonce = String(value || "").trim();
+  if (!nonce) {
+    throw new Error("Nonce OAuth ausente.");
+  }
+  return nonce;
+}
+
+function assertTokenNonce(provider, actualNonce, expectedNonce) {
+  const expected = normalizeExpectedNonce(expectedNonce);
+  if (!actualNonce || String(actualNonce) !== expected) {
+    throw new Error(`Nonce OAuth inválido para ${provider}.`);
+  }
+}
+
+export async function validarGoogleToken(idToken, expectedNonce) {
   try {
-    const audience = ENV.GOOGLE_CLIENT_ID;
-    if (!audience) {
-      throw new Error("Configuração ausente: GOOGLE_CLIENT_ID.");
+    const audiences = getGoogleAudiences();
+    if (!audiences.length) {
+      throw new Error("Configuração ausente: GOOGLE_CLIENT_ID ou GOOGLE_CLIENT_IDS.");
     }
 
-    const ticket = await getGoogleClient(audience).verifyIdToken({
+    const ticket = await getGoogleClient().verifyIdToken({
       idToken,
-      audience
+      audience: audiences.length === 1 ? audiences[0] : audiences,
     });
     const payload = ticket?.getPayload();
 
     if (!payload || payload.email_verified !== true) {
       throw new Error("Token Google inválido ou e-mail não verificado.");
     }
-    if (String(payload.aud || "") !== String(audience)) {
+    if (!audiences.includes(String(payload.aud || ""))) {
       throw new Error("Token Google inválido para este aplicativo (audience mismatch).");
     }
+    assertTokenNonce("Google", payload.nonce, expectedNonce);
 
     return {
       email: payload.email,
@@ -48,7 +76,7 @@ export async function validarGoogleToken(idToken) {
   }
 }
 
-export async function validarAppleToken(idToken) {
+export async function validarAppleToken(idToken, expectedNonce) {
   try {
     const audience = ENV.APPLE_CLIENT_ID;
     if (!audience) {
@@ -61,6 +89,7 @@ export async function validarAppleToken(idToken) {
     });
 
     if (!decoded?.sub) throw new Error("Token Apple inválido.");
+    assertTokenNonce("Apple", decoded.nonce, expectedNonce);
 
     return {
       sub: decoded.sub,

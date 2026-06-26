@@ -37,7 +37,11 @@ if (!/^\d+[smhd]$/.test(tokenExpirationRaw)) {
 const isProd = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
 
 // OAuth: exigido em produção para evitar falha tardia em login social.
-const googleClientId = requiredInProduction('GOOGLE_CLIENT_ID');
+const googleClientId = optionalEnv('GOOGLE_CLIENT_ID');
+const googleClientIds = optionalEnv('GOOGLE_CLIENT_IDS');
+if (isProd && !googleClientId && !googleClientIds) {
+  throw new Error('GOOGLE_CLIENT_ID ou GOOGLE_CLIENT_IDS não configurado.');
+}
 const appleClientId = requiredInProduction('APPLE_CLIENT_ID');
 
 // Gateway webhook/admin de sistema: obrigatório em produção.
@@ -136,6 +140,7 @@ export const ENV = {
   GOOGLE_REDIRECT_URI: process.env.GOOGLE_REDIRECT_URI,
   APPLE_REDIRECT_URI: process.env.APPLE_REDIRECT_URI,
   GOOGLE_CLIENT_ID: googleClientId,
+  GOOGLE_CLIENT_IDS: googleClientIds,
   APPLE_CLIENT_ID: appleClientId,
 
   // Gateway
