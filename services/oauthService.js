@@ -61,7 +61,12 @@ export async function validarGoogleToken(idToken, expectedNonce) {
     if (!audiences.includes(String(payload.aud || ""))) {
       throw new Error("Token Google inválido para este aplicativo (audience mismatch).");
     }
-    assertTokenNonce("Google", payload.nonce, expectedNonce);
+    // TODO: O SDK nativo gratuito do Google Sign-In não suporta nonce.
+    // Reavaliar Universal Sign In/Credential Manager antes do hardening final de produção.
+    const expectedGoogleNonce = String(expectedNonce || "").trim();
+    if (expectedGoogleNonce) {
+      assertTokenNonce("Google", payload.nonce, expectedGoogleNonce);
+    }
 
     return {
       email: payload.email,
