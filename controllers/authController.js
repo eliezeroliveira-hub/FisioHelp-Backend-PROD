@@ -190,13 +190,15 @@ const authController = {
       else if (prov === 'apple') dadosOAuth = await validarAppleToken(id_token, nonce);
       else return res.status(400).json({ erro: 'Provedor OAuth inválido.' });
 
-      if (!dadosOAuth?.email) {
+      if (prov !== 'apple' && !dadosOAuth?.email) {
         return res.status(401).json({ erro: 'Token OAuth inválido.' });
       }
 
       const data = await authService.loginOAuth(
         {
-          email: dadosOAuth.email,
+          provedor: dadosOAuth.provedor || prov,
+          sub: dadosOAuth.sub || null,
+          email: dadosOAuth.email || null,
           nome: dadosOAuth.nome || dadosOAuth.name || null,
           emailVerificado: dadosOAuth.emailVerificado === true
         },

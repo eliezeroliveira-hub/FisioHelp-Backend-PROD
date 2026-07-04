@@ -6,7 +6,7 @@ import crypto from "crypto";
 import net from "net";
 import { ENV } from "../config/env.js";
 import { log } from "../config/logger.js";
-import { normalizeCNPJ } from "../utils/identityValidators.js";
+import { normalizeCNPJ, normalizeEmail } from "../utils/identityValidators.js";
 
 const REFRESH_DAYS = Number(ENV.REFRESH_TOKEN_DAYS || 30);
 const ACCESS_TOKEN_CACHE_FALLBACK_TTL_MS = 30 * 1000;
@@ -181,6 +181,20 @@ function normalizeTipoUsuario(tipo) {
   return String(tipo).trim();
 }
 
+function normalizeOAuthProvider(value) {
+  const provider = String(value ?? "").trim().toLowerCase();
+  if (provider === "apple" || provider === "google") return provider;
+  return null;
+}
+
+function normalizeOAuthSubject(value) {
+  const subject = String(value ?? "").trim();
+  return subject ? subject.slice(0, 255) : null;
+}
+
+function isApplePrivateRelayEmail(email) {
+  return /@privaterelay\.appleid\.com$/i.test(String(email || "").trim());
+}
 function formatarDataHoraPtBr(dateLike) {
   const d = dateLike instanceof Date ? dateLike : new Date(dateLike);
   if (Number.isNaN(d.getTime())) return null;
@@ -603,6 +617,95 @@ async function getUserByTipoId(pool, tipo, id) {
   return null;
 }
 
+async function findUserByOAuthIdentity(pool, { provider, subject }) {
+  const provedor = normalizeOAuthProvider(provider);
+  const subjectNorm = normalizeOAuthSubject(subject);
+  if (!provedor || !subjectNorm) return null;
+
+  const r = await pool
+    .request()
+    .input("Provedor", sql.NVarChar(30), provedor)
+    .input("Subject", sql.NVarChar(255), subjectNorm)
+    .query(`
+      IF OBJECT_ID(N'dbo.UsuarioOAuthIdentidades', N'U') IS NULL
+      BEGIN
+        SELECT TOP (0)
+          CAST(NULL AS NVARCHAR(30)) AS UsuarioTipo,
+          CAST(NULL AS INT) AS UsuarioId;
+      END
+      ELSE
+      BEGIN
+        SELECT TOP (1)
+          UsuarioTipo,
+          UsuarioId
+        FROM dbo.UsuarioOAuthIdentidades
+        WHERE Provedor = @Provedor
+          AND Subject = @Subject
+          AND RevogadoEm IS NULL;
+      END
+    `);
+
+  const row = r.recordset?.[0];
+  if (!row?.UsuarioTipo || !row?.UsuarioId) return null;
+  return getUserByTipoId(pool, row.UsuarioTipo, Number(row.UsuarioId));
+}
+
+async function salvarOAuthIdentity(pool, { provider, subject, usuario, email, nome }) {
+  const provedor = normalizeOAuthProvider(provider);
+  const subjectNorm = normalizeOAuthSubject(subject);
+  const tipo = normalizeTipoUsuario(usuario?.tipo);
+  const usuarioId = Number(usuario?.id);
+  if (!provedor || !subjectNorm || !tipo || !usuarioId) return;
+
+  const emailNorm = email ? normalizeEmail(email) : null;
+
+  await pool
+    .request()
+    .input("Provedor", sql.NVarChar(30), provedor)
+    .input("Subject", sql.NVarChar(255), subjectNorm)
+    .input("UsuarioTipo", sql.NVarChar(30), tipo)
+    .input("UsuarioId", sql.Int, usuarioId)
+    .input("EmailAtual", sql.NVarChar(300), emailNorm)
+    .input("EmailRelay", sql.Bit, isApplePrivateRelayEmail(emailNorm) ? 1 : 0)
+    .input("NomeAtual", sql.NVarChar(300), nome ? String(nome).trim().slice(0, 300) : null)
+    .query(`
+      IF OBJECT_ID(N'dbo.UsuarioOAuthIdentidades', N'U') IS NULL
+        RETURN;
+
+      DECLARE @AtualUsuarioTipo NVARCHAR(30), @AtualUsuarioId INT;
+
+      SELECT TOP (1)
+        @AtualUsuarioTipo = UsuarioTipo,
+        @AtualUsuarioId = UsuarioId
+      FROM dbo.UsuarioOAuthIdentidades WITH (UPDLOCK, HOLDLOCK)
+      WHERE Provedor = @Provedor
+        AND Subject = @Subject
+        AND RevogadoEm IS NULL;
+
+      IF @AtualUsuarioId IS NOT NULL
+      BEGIN
+        IF @AtualUsuarioTipo <> @UsuarioTipo OR @AtualUsuarioId <> @UsuarioId
+          THROW 50091, 'Identidade OAuth vinculada a outra conta.', 1;
+
+        UPDATE dbo.UsuarioOAuthIdentidades
+        SET EmailAtual = COALESCE(@EmailAtual, EmailAtual),
+            EmailRelay = CASE WHEN @EmailAtual IS NULL THEN EmailRelay ELSE @EmailRelay END,
+            NomeAtual = COALESCE(@NomeAtual, NomeAtual),
+            UltimoLoginEm = SYSDATETIME(),
+            AtualizadoEm = SYSDATETIME()
+        WHERE Provedor = @Provedor
+          AND Subject = @Subject
+          AND RevogadoEm IS NULL;
+
+        RETURN;
+      END;
+
+      INSERT INTO dbo.UsuarioOAuthIdentidades
+        (Provedor, Subject, UsuarioTipo, UsuarioId, EmailAtual, EmailRelay, NomeAtual, UltimoLoginEm)
+      VALUES
+        (@Provedor, @Subject, @UsuarioTipo, @UsuarioId, @EmailAtual, @EmailRelay, @NomeAtual, SYSDATETIME());
+    `);
+}
 async function blacklistAccessToken(pool, { jti, exp }) {
   if (!jti || !exp) return;
 
@@ -722,15 +825,19 @@ export const authService = {
   },
 
   /**
-   * Login OAuth (por e-mail validado no provedor):
-   * - busca usuário por e-mail (Admin/Fisioterapeuta/Paciente) via SPs
+   * Login OAuth:
+   * - busca usuário por identidade OAuth (provedor + subject) ou e-mail verificado
    * - revalida status (Ativo/IsBloqueado)
    * - emite access token + refresh token
    */
   async loginOAuth(payload, reqLike = null) {
-    const email = payload?.email ? String(payload.email).trim() : null;
-    if (!email) throw new Error("Usuário não encontrado.");
-    if (payload?.emailVerificado !== true) {
+    const provider = normalizeOAuthProvider(payload?.provedor);
+    const subject = normalizeOAuthSubject(payload?.sub);
+    const email = payload?.email ? normalizeEmail(payload.email) : null;
+
+    if (!provider) throw new Error("Provedor OAuth inválido.");
+    if (!subject && !email) throw new Error("Usuário não encontrado.");
+    if (email && payload?.emailVerificado !== true) {
       throw new Error("Token OAuth inválido: e-mail não verificado.");
     }
 
@@ -738,7 +845,14 @@ export const authService = {
 
     const pool = await getPool();
 
-    const usuario = await findUserByIdentifier(pool, { email, cpf: null, cnpj: null });
+    let usuario = subject
+      ? await findUserByOAuthIdentity(pool, { provider, subject })
+      : null;
+
+    if (!usuario && email) {
+      usuario = await findUserByIdentifier(pool, { email, cpf: null, cnpj: null });
+    }
+
     if (!usuario) throw new Error("Usuário não encontrado.");
 
     const freshFlags = await reloadAuthFlagsByTipoId(pool, usuario.tipo, usuario.id).catch(() => null);
@@ -752,6 +866,16 @@ export const authService = {
     }
 
     enforceAcessoLogin(usuario);
+
+    if (subject) {
+      await salvarOAuthIdentity(pool, {
+        provider,
+        subject,
+        usuario,
+        email,
+        nome: payload?.nome || null
+      });
+    }
 
     const jti = crypto.randomUUID();
     const accessToken = jwt.sign(
