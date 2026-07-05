@@ -1596,6 +1596,8 @@ const fisioterapeutasService = {
             DECLARE @OAuthTokenEncontrado BIT = 0;
             DECLARE @OAuthExpiraEm DATETIME2(3) = NULL;
             DECLARE @OAuthUsadoEm DATETIME2(3) = NULL;
+            DECLARE @OAuthUsuarioTipo NVARCHAR(30) = NULL;
+            DECLARE @OAuthUsuarioId INT = NULL;
 
             SELECT TOP (1)
               @OAuthTokenEncontrado = 1,
@@ -1603,7 +1605,9 @@ const fisioterapeutasService = {
               @OAuthEmailRelay = ISNULL(EmailRelay, 0),
               @OAuthNomeAtual = Nome,
               @OAuthExpiraEm = ExpiraEm,
-              @OAuthUsadoEm = UsadoEm
+              @OAuthUsadoEm = UsadoEm,
+              @OAuthUsuarioTipo = UsuarioTipo,
+              @OAuthUsuarioId = UsuarioId
             FROM dbo.OAuthCadastroTokens WITH (UPDLOCK, HOLDLOCK)
             WHERE Jti = @OAuthTokenId
               AND Provedor = @OAuthProvedor
@@ -1613,7 +1617,12 @@ const fisioterapeutasService = {
               THROW 50121, N'OAUTH_SIGNUP_TOKEN_INVALID', 1;
 
             IF @OAuthUsadoEm IS NOT NULL
+            BEGIN
+              IF @OAuthUsuarioId IS NOT NULL AND @OAuthUsuarioTipo = N'Fisioterapeuta'
+                THROW 50125, N'CADASTRO_JA_CONCLUIDO', 1;
+
               THROW 50123, N'OAUTH_SIGNUP_TOKEN_USED', 1;
+            END
 
             IF @OAuthExpiraEm <= SYSDATETIME()
               THROW 50122, N'OAUTH_SIGNUP_TOKEN_EXPIRED', 1;
@@ -1756,8 +1765,8 @@ const fisioterapeutasService = {
     }
 
     if (novoId) {
-      try {
-        const verificacao = await solicitarVerificacaoContatoInterna({
+      fisio.verificacaoEmailEnviada = false;
+      void solicitarVerificacaoContatoInterna({
           usuarioTipo: 'Fisioterapeuta',
           usuarioId: novoId,
           canal: 'Email',
@@ -1767,17 +1776,19 @@ const fisioterapeutasService = {
             codigo,
             expiraEmMinutos,
           }),
-        });
-        fisio.verificacaoEmailEnviada = true;
-        fisio.destinoEmailVerificacao = verificacao.destinoMascarado;
-        if (verificacao.codigoDev) fisio.codigoDev = verificacao.codigoDev;
-      } catch (err) {
+      })
+        .then((verificacao) => {
+          log('info', 'Verificação de e-mail solicitada no cadastro de fisioterapeuta', {
+            fisioterapeutaId: novoId,
+            destino: verificacao?.destinoMascarado,
+          });
+        })
+        .catch((err) => {
         log('warn', 'Falha ao enviar e-mail de verificação no cadastro de fisioterapeuta', {
           fisioterapeutaId: novoId,
           erro: err?.message,
         });
-        fisio.verificacaoEmailEnviada = false;
-      }
+        });
     }
 
     return fisio;

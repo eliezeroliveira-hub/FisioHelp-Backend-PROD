@@ -399,6 +399,8 @@ export const pacientesService = {
             DECLARE @OAuthTokenEncontrado BIT = 0;
             DECLARE @OAuthExpiraEm DATETIME2(3) = NULL;
             DECLARE @OAuthUsadoEm DATETIME2(3) = NULL;
+            DECLARE @OAuthUsuarioTipo NVARCHAR(30) = NULL;
+            DECLARE @OAuthUsuarioId INT = NULL;
 
             SELECT TOP (1)
               @OAuthTokenEncontrado = 1,
@@ -406,7 +408,9 @@ export const pacientesService = {
               @OAuthEmailRelay = ISNULL(EmailRelay, 0),
               @OAuthNomeAtual = Nome,
               @OAuthExpiraEm = ExpiraEm,
-              @OAuthUsadoEm = UsadoEm
+              @OAuthUsadoEm = UsadoEm,
+              @OAuthUsuarioTipo = UsuarioTipo,
+              @OAuthUsuarioId = UsuarioId
             FROM dbo.OAuthCadastroTokens WITH (UPDLOCK, HOLDLOCK)
             WHERE Jti = @OAuthTokenId
               AND Provedor = @OAuthProvedor
@@ -416,7 +420,12 @@ export const pacientesService = {
               THROW 50121, N'OAUTH_SIGNUP_TOKEN_INVALID', 1;
 
             IF @OAuthUsadoEm IS NOT NULL
+            BEGIN
+              IF @OAuthUsuarioId IS NOT NULL AND @OAuthUsuarioTipo = N'Paciente'
+                THROW 50125, N'CADASTRO_JA_CONCLUIDO', 1;
+
               THROW 50123, N'OAUTH_SIGNUP_TOKEN_USED', 1;
+            END
 
             IF @OAuthExpiraEm <= SYSDATETIME()
               THROW 50122, N'OAUTH_SIGNUP_TOKEN_EXPIRED', 1;
@@ -513,8 +522,8 @@ export const pacientesService = {
       const novo = result.recordset?.[0] || null;
       if (novo) delete novo.SenhaHash;
       if (novo?.Id) {
-        try {
-          const verificacao = await solicitarVerificacaoContatoInterna({
+        novo.verificacaoEmailEnviada = false;
+        void solicitarVerificacaoContatoInterna({
             usuarioTipo: 'Paciente',
             usuarioId: novo.Id,
             canal: 'Email',
@@ -524,17 +533,19 @@ export const pacientesService = {
               codigo,
               expiraEmMinutos,
             }),
-          });
-          novo.verificacaoEmailEnviada = true;
-          novo.destinoEmailVerificacao = verificacao.destinoMascarado;
-          if (verificacao.codigoDev) novo.codigoDev = verificacao.codigoDev;
-        } catch (err) {
+        })
+          .then((verificacao) => {
+            log('info', 'Verificação de e-mail solicitada no cadastro de paciente', {
+              pacienteId: novo.Id,
+              destino: verificacao?.destinoMascarado,
+            });
+          })
+          .catch((err) => {
           log('warn', 'Falha ao enviar e-mail de verificação no cadastro de paciente', {
             pacienteId: novo.Id,
             erro: err?.message,
           });
-          novo.verificacaoEmailEnviada = false;
-        }
+          });
       }
       return novo;
     } catch (e) {

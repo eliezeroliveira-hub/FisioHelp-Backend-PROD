@@ -240,6 +240,9 @@ function mapOAuthCadastroError(err) {
   if (num === 50123 || msg.includes("oauth_signup_token_used")) {
     return authHttpError("Sessão Apple/Google já utilizada. Reautorize para continuar.", 409, "OAUTH_SIGNUP_TOKEN_USED");
   }
+  if (num === 50125 || msg.includes("cadastro_ja_concluido")) {
+    return authHttpError("Cadastro já concluído. Entre pelo login.", 409, "CADASTRO_JA_CONCLUIDO");
+  }
   if (num === 50124 || msg.includes("oauth_identity_already_linked")) {
     return authHttpError("Esta conta Apple/Google já está vinculada. Entre pelo login.", 409, "OAUTH_IDENTITY_ALREADY_LINKED");
   }

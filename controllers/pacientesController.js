@@ -99,9 +99,10 @@ const pacientesController = {
     } catch (erro) {
       log('error', 'Erro ao criar paciente', { erro: erro.message });
       const status = erro?.httpStatus || 400;
+      const mensagem = erro?.message || 'Erro ao criar paciente.';
       return res.status(status).json({
-        erro: status >= 500 ? 'Erro interno do servidor.' : 'Erro ao criar paciente.',
-        detalhes: status >= 500 ? undefined : erro?.message,
+        erro: status >= 500 ? 'Erro interno do servidor.' : mensagem,
+        detalhes: status >= 500 ? undefined : mensagem,
         codigo: status >= 500 ? undefined : (erro?.code || erro?.codigo)
       });
     }
