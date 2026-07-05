@@ -680,6 +680,83 @@ function mapPreCadastroPacienteError(err) {
   return err;
 }
 
+async function buscarPreCadastroPacienteExistente(fisioterapeutaId, cpf) {
+  if (!fisioterapeutaId || !cpf) return null;
+
+  const result = await queryWithContext(
+    null,
+    (req) => {
+      req.input('FisioterapeutaId', sql.Int, Number(fisioterapeutaId));
+      req.input('CPF', sql.NVarChar(40), cpf);
+    },
+    `
+      SELECT TOP 1
+        p.Id AS PacienteId,
+        fpc.FisioterapeutaId,
+        p.Nome,
+        p.Email,
+        p.OrigemCadastro
+      FROM dbo.Pacientes p
+      INNER JOIN dbo.FisioPacientesCarteira fpc
+        ON fpc.PacienteId = p.Id
+      WHERE fpc.FisioterapeutaId = @FisioterapeutaId
+        AND fpc.Ativo = 1
+        AND p.CPF = @CPF
+      ORDER BY fpc.CriadoEm DESC, p.Id DESC;
+    `
+  );
+
+  return result.recordset?.[0] ?? null;
+}
+
+function enviarConvitePreCadastroPacienteAsync({
+  fisioterapeutaId,
+  pacienteId,
+  nomePaciente,
+  nomeFallback,
+  destino,
+} = {}) {
+  if (!destino) return;
+
+  Promise.resolve()
+    .then(async () => {
+      const fisioRes = await queryWithContext(
+        null,
+        (req) => req.input('FisioterapeutaId', sql.Int, Number(fisioterapeutaId)),
+        `
+          SELECT TOP 1 Nome
+          FROM dbo.Fisioterapeutas
+          WHERE Id = @FisioterapeutaId;
+        `
+      );
+      const nomeFisioterapeuta = fisioRes.recordset?.[0]?.Nome || 'Seu fisioterapeuta';
+      const template = montarEmailConvitePreCadastroSimples({
+        nomePaciente: nomePaciente || nomeFallback,
+        nomeFisioterapeuta,
+      });
+      const envio = await contatoProvider.enviarEmail({
+        destino,
+        assunto: template.assunto,
+        html: template.corpoHtml || template.html,
+        texto: template.corpoTexto || template.texto,
+      });
+
+      if (!envio?.ok) {
+        log('warn', 'Envio de convite de pré-cadastro de paciente não confirmado', {
+          fisioterapeutaId: Number(fisioterapeutaId),
+          pacienteId: Number(pacienteId) || null,
+          destino: contatoProvider.mascararDestino('Email', destino),
+        });
+      }
+    })
+    .catch((err) => {
+      log('warn', 'Falha ao enviar convite de pré-cadastro de paciente', {
+        fisioterapeutaId: Number(fisioterapeutaId),
+        pacienteId: Number(pacienteId) || null,
+        erro: err?.message,
+      });
+    });
+}
 const fisioterapeutasService = {
   //  agora aceita usuario opcional (Admin pode chamar com contexto)
   async listarTodos(incluirInativos = false, usuario = null, paginacao = {}) {
@@ -2693,6 +2770,14 @@ const fisioterapeutasService = {
       throw new HttpError(400, 'Telefone inválido: use DDD + número (10 ou 11 dígitos).');
     }
 
+    const preCadastroExistente = await buscarPreCadastroPacienteExistente(fisioterapeutaId, cpf);
+    if (preCadastroExistente) {
+      return {
+        ...preCadastroExistente,
+        jaExistente: true,
+        mensagem: 'Paciente já está na sua carteira.'
+      };
+    }
     //  Unicidade GLOBAL (Admin/Paciente/Fisio) - antes de chamar a SP
     const dupEmailGlobal = await queryWithContext(
       null,
@@ -2868,46 +2953,25 @@ const fisioterapeutasService = {
       pacienteConvite = pacienteRes.recordset?.[0] || pacienteConvite;
     }
 
-    let conviteEmailEnviado = false;
-    let destinoConviteMascarado = null;
     const destinoConvite = pacienteConvite?.Email || emailNorm;
-    if (destinoConvite) {
-      try {
-        const fisioRes = await queryWithContext(
-          null,
-          (req) => req.input('FisioterapeutaId', sql.Int, Number(fisioterapeutaId)),
-          `
-            SELECT TOP 1 Nome
-            FROM dbo.Fisioterapeutas
-            WHERE Id = @FisioterapeutaId;
-          `
-        );
-        const nomeFisioterapeuta = fisioRes.recordset?.[0]?.Nome || 'Seu fisioterapeuta';
-        const template = montarEmailConvitePreCadastroSimples({
-          nomePaciente: pacienteConvite?.Nome || nome,
-          nomeFisioterapeuta,
-        });
-        const envio = await contatoProvider.enviarEmail({
-          destino: destinoConvite,
-          assunto: template.assunto,
-          html: template.corpoHtml || template.html,
-          texto: template.corpoTexto || template.texto,
-        });
+    const destinoConviteMascarado = destinoConvite
+      ? contatoProvider.mascararDestino('Email', destinoConvite)
+      : null;
 
-        conviteEmailEnviado = Boolean(envio?.ok);
-        destinoConviteMascarado = contatoProvider.mascararDestino('Email', destinoConvite);
-      } catch (err) {
-        log('warn', 'Falha ao enviar convite de pré-cadastro de paciente', {
-          fisioterapeutaId: Number(fisioterapeutaId),
-          pacienteId: pacienteId || null,
-          erro: err?.message,
-        });
-      }
+    if (destinoConvite) {
+      enviarConvitePreCadastroPacienteAsync({
+        fisioterapeutaId: Number(fisioterapeutaId),
+        pacienteId: pacienteId || null,
+        nomePaciente: pacienteConvite?.Nome || nome,
+        nomeFallback: nome,
+        destino: destinoConvite,
+      });
     }
 
     return {
       ...(row || {}),
-      conviteEmailEnviado,
+      conviteEmailEnviado: false,
+      conviteEmailPendente: Boolean(destinoConvite),
       destinoConviteMascarado,
       mensagem: 'Paciente pré-cadastrado com sucesso.'
     };

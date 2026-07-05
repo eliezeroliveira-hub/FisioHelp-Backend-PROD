@@ -819,12 +819,14 @@ const fisioterapeutasController = {
       const FisioterapeutaId = resultado?.FisioterapeutaId ?? resultado?.fisioterapeutaId ?? fisioId;
 
       const mensagem = resultado?.Mensagem || resultado?.mensagem || 'Paciente pré-cadastrado com sucesso.';
+      const jaExistente = Boolean(resultado?.jaExistente || resultado?.JaExistente);
 
-      return res.status(201).json({
+      return res.status(jaExistente ? 200 : 201).json({
         sucesso: true,
         mensagem,
         PacienteId,
-        FisioterapeutaId
+        FisioterapeutaId,
+        jaExistente
       });
 } catch (erro) {
       const status = erro?.statusCode || 500;
