@@ -66,10 +66,11 @@ function authErrorPayload(err, fallbackStatus = 500) {
     };
   }
   const status = err?.httpStatus || err?.statusCode || statusFromAuthMessage(err?.message, fallbackStatus);
-  return {
-    status,
-    body: { erro: status >= 500 ? 'Erro interno do servidor.' : (err?.message || 'Erro interno no login.') }
+  const body = {
+    erro: status >= 500 ? 'Erro interno do servidor.' : (err?.message || 'Erro interno no login.')
   };
+  if (status < 500 && (err?.code || err?.codigo)) body.codigo = err.code || err.codigo;
+  return { status, body };
 }
 
 /**
@@ -221,6 +222,51 @@ const authController = {
     }
   },
 
+  /**
+   * Gera token interno de cadastro OAuth (Google / Apple)
+   *
+   * Não cria sessão. Só prova que o usuário acabou de autorizar o provedor.
+   * O token retornado é single-use e deve ser consumido no cadastro público.
+   */
+  async criarOAuthCadastroToken(req, res) {
+    const { provedor, id_token, nonce, nome } = req.body || {};
+    const prov = String(provedor || '').toLowerCase().trim();
+
+    if (!provedor || !id_token) {
+      return res.status(400).json({ erro: 'Provedor ou token ausente.' });
+    }
+    if (prov === 'apple' && !String(nonce || '').trim()) {
+      return res.status(400).json({ erro: 'Nonce OAuth ausente.' });
+    }
+
+    try {
+      let dadosOAuth;
+      if (prov === 'google') dadosOAuth = await validarGoogleToken(id_token, nonce);
+      else if (prov === 'apple') dadosOAuth = await validarAppleToken(id_token, nonce);
+      else return res.status(400).json({ erro: 'Provedor OAuth inválido.' });
+
+      if (prov !== 'apple' && !dadosOAuth?.email) {
+        return res.status(401).json({ erro: 'Token OAuth inválido.' });
+      }
+
+      const data = await authService.criarOAuthCadastroToken({
+        provedor: dadosOAuth.provedor || prov,
+        sub: dadosOAuth.sub || null,
+        email: dadosOAuth.email || null,
+        nome: dadosOAuth.nome || dadosOAuth.name || nome || null,
+        emailVerificado: dadosOAuth.emailVerificado === true
+      });
+
+      return res.status(200).json({
+        sucesso: true,
+        mensagem: 'OAuth validado para cadastro.',
+        ...data
+      });
+    } catch (erro) {
+      const out = authErrorPayload(erro, 401);
+      return res.status(out.status).json(out.body);
+    }
+  },
   /**
    * Refresh Token (Access + Refresh rotacionado)
    *

@@ -12,6 +12,7 @@ import {
   montarEmailVerificacaoFisioterapeuta,
 } from './contatoTemplates.js';
 import { solicitarVerificacaoContatoInterna } from './verificacaoContatoService.js';
+import { authService } from './authService.js';
 import contatoProvider from '../providers/contatoProvider.js';
 import { HttpError } from '../utils/httpError.js';
 import { getContatoSecret } from '../utils/contactSecret.js';
@@ -581,6 +582,9 @@ function normalizarPaginacao(page, pageSize) {
 }
 
 function mapFisioterapeutaCreateError(err) {
+  const oauthErr = authService.mapOAuthCadastroDbError?.(err);
+  if (oauthErr) return oauthErr;
+
   const num =
     err?.number ??
     err?.originalError?.info?.number ??
@@ -1529,6 +1533,7 @@ const fisioterapeutasService = {
     }
 
     const senhaHash = await bcrypt.hash(Senha, 12);
+    const oauthCadastro = authService.validarOAuthCadastroToken(dados?.oauthCadastroToken ?? dados?.OAuthCadastroToken ?? null);
 
     // Defaults
     const tolerancia = 60;
@@ -1562,12 +1567,66 @@ const fisioterapeutasService = {
         req.input('Genero', sql.NVarChar(40), Genero);
         req.input('CodigoIndicacao', sql.NVarChar(50), CodigoIndicacao || null);
         req.input('EspecialidadeId', sql.Int, especialidadeIdNum);
+        req.input('OAuthJti', sql.NVarChar(36), oauthCadastro?.jti || null);
+        req.input('OAuthProvedor', sql.NVarChar(30), oauthCadastro?.provider || null);
+        req.input('OAuthSubject', sql.NVarChar(255), oauthCadastro?.subject || null);
       },
       `
         SET XACT_ABORT ON;
 
         BEGIN TRY
           BEGIN TRAN;
+
+          DECLARE @OAuthTokenId UNIQUEIDENTIFIER = TRY_CONVERT(UNIQUEIDENTIFIER, @OAuthJti);
+          DECLARE @OAuthEmailAtual NVARCHAR(300) = NULL;
+          DECLARE @OAuthEmailRelay BIT = 0;
+          DECLARE @OAuthNomeAtual NVARCHAR(300) = NULL;
+
+          IF @OAuthJti IS NOT NULL
+          BEGIN
+            IF @OAuthTokenId IS NULL
+              THROW 50121, N'OAUTH_SIGNUP_TOKEN_INVALID', 1;
+
+            IF OBJECT_ID(N'dbo.OAuthCadastroTokens', N'U') IS NULL
+              THROW 50120, N'OAUTH_SIGNUP_TABLE_MISSING', 1;
+
+            IF OBJECT_ID(N'dbo.UsuarioOAuthIdentidades', N'U') IS NULL
+              THROW 50120, N'OAUTH_SIGNUP_TABLE_MISSING', 1;
+
+            DECLARE @OAuthTokenEncontrado BIT = 0;
+            DECLARE @OAuthExpiraEm DATETIME2(3) = NULL;
+            DECLARE @OAuthUsadoEm DATETIME2(3) = NULL;
+
+            SELECT TOP (1)
+              @OAuthTokenEncontrado = 1,
+              @OAuthEmailAtual = Email,
+              @OAuthEmailRelay = ISNULL(EmailRelay, 0),
+              @OAuthNomeAtual = Nome,
+              @OAuthExpiraEm = ExpiraEm,
+              @OAuthUsadoEm = UsadoEm
+            FROM dbo.OAuthCadastroTokens WITH (UPDLOCK, HOLDLOCK)
+            WHERE Jti = @OAuthTokenId
+              AND Provedor = @OAuthProvedor
+              AND Subject = @OAuthSubject;
+
+            IF @OAuthTokenEncontrado = 0
+              THROW 50121, N'OAUTH_SIGNUP_TOKEN_INVALID', 1;
+
+            IF @OAuthUsadoEm IS NOT NULL
+              THROW 50123, N'OAUTH_SIGNUP_TOKEN_USED', 1;
+
+            IF @OAuthExpiraEm <= SYSDATETIME()
+              THROW 50122, N'OAUTH_SIGNUP_TOKEN_EXPIRED', 1;
+
+            IF EXISTS (
+              SELECT 1
+              FROM dbo.UsuarioOAuthIdentidades WITH (UPDLOCK, HOLDLOCK)
+              WHERE Provedor = @OAuthProvedor
+                AND Subject = @OAuthSubject
+                AND RevogadoEm IS NULL
+            )
+              THROW 50124, N'OAUTH_IDENTITY_ALREADY_LINKED', 1;
+          END
 
           DECLARE @NovoId TABLE (Id INT);
 
@@ -1594,6 +1653,25 @@ const fisioterapeutasService = {
           );
 
           DECLARE @FisioId INT = (SELECT TOP 1 Id FROM @NovoId);
+
+          IF @OAuthJti IS NOT NULL
+          BEGIN
+            INSERT INTO dbo.UsuarioOAuthIdentidades
+              (Provedor, Subject, UsuarioTipo, UsuarioId, EmailAtual, EmailRelay, NomeAtual, UltimoLoginEm)
+            VALUES
+              (@OAuthProvedor, @OAuthSubject, N'Fisioterapeuta', @FisioId, @OAuthEmailAtual, @OAuthEmailRelay, COALESCE(@OAuthNomeAtual, @Nome), SYSDATETIME());
+
+            UPDATE dbo.OAuthCadastroTokens
+            SET UsadoEm = SYSDATETIME(),
+                UsuarioTipo = N'Fisioterapeuta',
+                UsuarioId = @FisioId,
+                AtualizadoEm = SYSDATETIME()
+            WHERE Jti = @OAuthTokenId
+              AND UsadoEm IS NULL;
+
+            IF @@ROWCOUNT <> 1
+              THROW 50123, N'OAUTH_SIGNUP_TOKEN_USED', 1;
+          END
 
           INSERT INTO dbo.DocumentosFisioterapeutas
             (FisioterapeutaId, TipoDocumento, CaminhoArquivo, Status, DataEnvio, FonteValidacao, ScoreConfianca)

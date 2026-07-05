@@ -101,7 +101,8 @@ const pacientesController = {
       const status = erro?.httpStatus || 400;
       return res.status(status).json({
         erro: status >= 500 ? 'Erro interno do servidor.' : 'Erro ao criar paciente.',
-        detalhes: status >= 500 ? undefined : erro?.message
+        detalhes: status >= 500 ? undefined : erro?.message,
+        codigo: status >= 500 ? undefined : (erro?.code || erro?.codigo)
       });
     }
   },
@@ -271,5 +272,3 @@ async confiabilidade(req, res) {
 };
 
 export default pacientesController;
-
-

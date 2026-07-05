@@ -14,6 +14,7 @@ const router = express.Router();
 
 router.post('/login', loginLimiter, authController.login);
 router.post('/oauth', loginLimiter, authController.loginOAuth);
+router.post('/oauth/cadastro-token', loginLimiter, authController.criarOAuthCadastroToken);
 router.post('/refresh', refreshLimiter, authController.refreshToken);
 router.post('/senha/esqueci', forgotPasswordRequestLimiter, authController.solicitarRedefinicaoSenha);
 router.post('/senha/confirmar-codigo', forgotPasswordConfirmLimiter, authController.confirmarCodigoRedefinicaoSenha);

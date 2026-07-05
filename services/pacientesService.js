@@ -175,6 +175,9 @@ function getSqlErrText(e) {
 }
 
 function mapUniqueError(e) {
+  const oauthErr = authService.mapOAuthCadastroDbError?.(e);
+  if (oauthErr) return oauthErr;
+
   const num =
     e?.number ??
     e?.originalError?.info?.number ??
@@ -342,6 +345,7 @@ export const pacientesService = {
       const cpfValido = 1;
 
       const senhaHash = await bcrypt.hash(String(Senha), 12);
+      const oauthCadastro = authService.validarOAuthCadastroToken(dados?.oauthCadastroToken ?? dados?.OAuthCadastroToken ?? null);
 
       const result = await queryWithContext(
         null,
@@ -366,9 +370,68 @@ export const pacientesService = {
           .input('BairroResidencial', sql.NVarChar(200), BairroResidencial)
           .input('BairroComercial', sql.NVarChar(200), BairroComercial)
           .input('ComplementoResidencial', sql.NVarChar(400), ComplementoResidencial)
-          .input('ComplementoComercial', sql.NVarChar(400), ComplementoComercial),
+          .input('ComplementoComercial', sql.NVarChar(400), ComplementoComercial)
+          .input('OAuthJti', sql.NVarChar(36), oauthCadastro?.jti || null)
+          .input('OAuthProvedor', sql.NVarChar(30), oauthCadastro?.provider || null)
+          .input('OAuthSubject', sql.NVarChar(255), oauthCadastro?.subject || null),
         `
-        INSERT INTO dbo.Pacientes
+        SET XACT_ABORT ON;
+
+        BEGIN TRY
+          BEGIN TRAN;
+
+          DECLARE @OAuthTokenId UNIQUEIDENTIFIER = TRY_CONVERT(UNIQUEIDENTIFIER, @OAuthJti);
+          DECLARE @OAuthEmailAtual NVARCHAR(300) = NULL;
+          DECLARE @OAuthEmailRelay BIT = 0;
+          DECLARE @OAuthNomeAtual NVARCHAR(300) = NULL;
+
+          IF @OAuthJti IS NOT NULL
+          BEGIN
+            IF @OAuthTokenId IS NULL
+              THROW 50121, N'OAUTH_SIGNUP_TOKEN_INVALID', 1;
+
+            IF OBJECT_ID(N'dbo.OAuthCadastroTokens', N'U') IS NULL
+              THROW 50120, N'OAUTH_SIGNUP_TABLE_MISSING', 1;
+
+            IF OBJECT_ID(N'dbo.UsuarioOAuthIdentidades', N'U') IS NULL
+              THROW 50120, N'OAUTH_SIGNUP_TABLE_MISSING', 1;
+
+            DECLARE @OAuthTokenEncontrado BIT = 0;
+            DECLARE @OAuthExpiraEm DATETIME2(3) = NULL;
+            DECLARE @OAuthUsadoEm DATETIME2(3) = NULL;
+
+            SELECT TOP (1)
+              @OAuthTokenEncontrado = 1,
+              @OAuthEmailAtual = Email,
+              @OAuthEmailRelay = ISNULL(EmailRelay, 0),
+              @OAuthNomeAtual = Nome,
+              @OAuthExpiraEm = ExpiraEm,
+              @OAuthUsadoEm = UsadoEm
+            FROM dbo.OAuthCadastroTokens WITH (UPDLOCK, HOLDLOCK)
+            WHERE Jti = @OAuthTokenId
+              AND Provedor = @OAuthProvedor
+              AND Subject = @OAuthSubject;
+
+            IF @OAuthTokenEncontrado = 0
+              THROW 50121, N'OAUTH_SIGNUP_TOKEN_INVALID', 1;
+
+            IF @OAuthUsadoEm IS NOT NULL
+              THROW 50123, N'OAUTH_SIGNUP_TOKEN_USED', 1;
+
+            IF @OAuthExpiraEm <= SYSDATETIME()
+              THROW 50122, N'OAUTH_SIGNUP_TOKEN_EXPIRED', 1;
+
+            IF EXISTS (
+              SELECT 1
+              FROM dbo.UsuarioOAuthIdentidades WITH (UPDLOCK, HOLDLOCK)
+              WHERE Provedor = @OAuthProvedor
+                AND Subject = @OAuthSubject
+                AND RevogadoEm IS NULL
+            )
+              THROW 50124, N'OAUTH_IDENTITY_ALREADY_LINKED', 1;
+          END
+
+          INSERT INTO dbo.Pacientes
           (Nome, CPF, Email, Telefone, DataNascimento, SenhaHash,
           CPFValido,
           Cidade, Estado, Naturalidade, EstadoCivil, Genero, Profissao,
@@ -383,7 +446,28 @@ export const pacientesService = {
           @BairroResidencial, @BairroComercial,
           @ComplementoResidencial, @ComplementoComercial);
 
-        DECLARE @NewId INT = CAST(SCOPE_IDENTITY() AS INT);
+          DECLARE @NewId INT = CAST(SCOPE_IDENTITY() AS INT);
+
+          IF @OAuthJti IS NOT NULL
+          BEGIN
+            INSERT INTO dbo.UsuarioOAuthIdentidades
+              (Provedor, Subject, UsuarioTipo, UsuarioId, EmailAtual, EmailRelay, NomeAtual, UltimoLoginEm)
+            VALUES
+              (@OAuthProvedor, @OAuthSubject, N'Paciente', @NewId, @OAuthEmailAtual, @OAuthEmailRelay, COALESCE(@OAuthNomeAtual, @Nome), SYSDATETIME());
+
+            UPDATE dbo.OAuthCadastroTokens
+            SET UsadoEm = SYSDATETIME(),
+                UsuarioTipo = N'Paciente',
+                UsuarioId = @NewId,
+                AtualizadoEm = SYSDATETIME()
+            WHERE Jti = @OAuthTokenId
+              AND UsadoEm IS NULL;
+
+            IF @@ROWCOUNT <> 1
+              THROW 50123, N'OAUTH_SIGNUP_TOKEN_USED', 1;
+          END
+
+          COMMIT;
 
         SELECT
           p.Id,
@@ -417,6 +501,11 @@ export const pacientesService = {
           p.TelefoneVerificadoEm
         FROM dbo.Pacientes p
         WHERE p.Id = @NewId;
+        END TRY
+        BEGIN CATCH
+          IF @@TRANCOUNT > 0 ROLLBACK;
+          THROW;
+        END CATCH
 
         `
       );

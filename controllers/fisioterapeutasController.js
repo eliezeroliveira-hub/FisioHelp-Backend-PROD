@@ -52,7 +52,8 @@ function handleError(res, erro) {
     || erro?.httpStatus
     || 500;
   return res.status(status).json({
-    erro: status >= 500 ? 'Erro interno do servidor.' : (erro?.message || 'Erro interno.')
+    erro: status >= 500 ? 'Erro interno do servidor.' : (erro?.message || 'Erro interno.'),
+    codigo: status >= 500 ? undefined : (erro?.code || erro?.codigo)
   });
 }
 
@@ -1216,5 +1217,3 @@ const fisioterapeutasController = {
 };
 
 export default fisioterapeutasController;
-
-

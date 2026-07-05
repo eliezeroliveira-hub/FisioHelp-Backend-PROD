@@ -9,6 +9,7 @@ import { log } from "../config/logger.js";
 import { normalizeCNPJ, normalizeEmail } from "../utils/identityValidators.js";
 
 const REFRESH_DAYS = Number(ENV.REFRESH_TOKEN_DAYS || 30);
+const OAUTH_SIGNUP_TOKEN_TTL_MINUTES = parsePositiveInt(process.env.OAUTH_SIGNUP_TOKEN_TTL_MINUTES, 60);
 const ACCESS_TOKEN_CACHE_FALLBACK_TTL_MS = 30 * 1000;
 const accessTokenRevocationCache = new Map();
 
@@ -194,6 +195,56 @@ function normalizeOAuthSubject(value) {
 
 function isApplePrivateRelayEmail(email) {
   return /@privaterelay\.appleid\.com$/i.test(String(email || "").trim());
+}
+function authHttpError(message, statusCode = 400, code = null) {
+  const err = new Error(message);
+  err.httpStatus = statusCode;
+  err.statusCode = statusCode;
+  if (code) err.code = code;
+  return err;
+}
+
+function getSqlErrorNumber(err) {
+  return (
+    err?.number ??
+    err?.originalError?.info?.number ??
+    err?.originalError?.number ??
+    null
+  );
+}
+
+function getSqlErrorText(err) {
+  return String(
+    [
+      err?.message,
+      err?.originalError?.info?.message,
+      err?.originalError?.message,
+      ...(Array.isArray(err?.precedingErrors) ? err.precedingErrors.map((x) => x?.message) : [])
+    ].filter(Boolean).join(" | ")
+  );
+}
+
+function mapOAuthCadastroError(err) {
+  const num = getSqlErrorNumber(err);
+  const msg = getSqlErrorText(err).toLowerCase();
+
+  if (num === 50120 || msg.includes("oauth_signup_table_missing")) {
+    return authHttpError("Infraestrutura de OAuth de cadastro indisponível.", 500, "OAUTH_SIGNUP_TABLE_MISSING");
+  }
+  if (num === 50121 || msg.includes("oauth_signup_token_invalid")) {
+    return authHttpError("Sessão Apple/Google inválida. Reautorize para continuar.", 401, "OAUTH_SIGNUP_TOKEN_INVALID");
+  }
+  if (num === 50122 || msg.includes("oauth_signup_token_expired")) {
+    return authHttpError("Sessão Apple/Google expirada. Reautorize para continuar.", 401, "OAUTH_SIGNUP_TOKEN_EXPIRED");
+  }
+  if (num === 50123 || msg.includes("oauth_signup_token_used")) {
+    return authHttpError("Sessão Apple/Google já utilizada. Reautorize para continuar.", 409, "OAUTH_SIGNUP_TOKEN_USED");
+  }
+  if (num === 50124 || msg.includes("oauth_identity_already_linked")) {
+    return authHttpError("Esta conta Apple/Google já está vinculada. Entre pelo login.", 409, "OAUTH_IDENTITY_ALREADY_LINKED");
+  }
+
+  return null;
 }
 function formatarDataHoraPtBr(dateLike) {
   const d = dateLike instanceof Date ? dateLike : new Date(dateLike);
@@ -824,6 +875,119 @@ export const authService = {
     };
   },
 
+  async criarOAuthCadastroToken(payload) {
+    const provider = normalizeOAuthProvider(payload?.provedor);
+    const subject = normalizeOAuthSubject(payload?.sub);
+    const email = payload?.email ? normalizeEmail(payload.email) : null;
+    const nome = payload?.nome ? String(payload.nome).trim().slice(0, 300) : null;
+    const emailVerificado = payload?.emailVerificado === true;
+
+    if (!provider || !subject) {
+      throw authHttpError("Token OAuth inválido.", 401, "OAUTH_SIGNUP_TOKEN_INVALID");
+    }
+    if (email && !emailVerificado) {
+      throw authHttpError("Token OAuth inválido: e-mail não verificado.", 401, "OAUTH_SIGNUP_TOKEN_INVALID");
+    }
+    if (!ENV.JWT_SECRET) throw new Error("JWT_SECRET não configurado.");
+
+    const pool = await getPool();
+    const usuarioVinculado = await findUserByOAuthIdentity(pool, { provider, subject });
+    if (usuarioVinculado) {
+      throw authHttpError("Esta conta Apple/Google já está vinculada. Entre pelo login.", 409, "OAUTH_IDENTITY_ALREADY_LINKED");
+    }
+
+    const jti = crypto.randomUUID();
+    const expiraEm = new Date(Date.now() + OAUTH_SIGNUP_TOKEN_TTL_MINUTES * 60 * 1000);
+
+    try {
+      await pool
+      .request()
+      .input("Jti", sql.NVarChar(36), jti)
+      .input("Provedor", sql.NVarChar(30), provider)
+      .input("Subject", sql.NVarChar(255), subject)
+      .input("Email", sql.NVarChar(300), email)
+      .input("EmailVerificado", sql.Bit, emailVerificado ? 1 : 0)
+      .input("EmailRelay", sql.Bit, isApplePrivateRelayEmail(email) ? 1 : 0)
+      .input("Nome", sql.NVarChar(300), nome)
+      .input("ExpiraEm", sql.DateTime2, expiraEm)
+      .query(`
+        IF OBJECT_ID(N'dbo.OAuthCadastroTokens', N'U') IS NULL
+          THROW 50120, N'OAUTH_SIGNUP_TABLE_MISSING', 1;
+
+        IF OBJECT_ID(N'dbo.UsuarioOAuthIdentidades', N'U') IS NULL
+          THROW 50120, N'OAUTH_SIGNUP_TABLE_MISSING', 1;
+
+        IF EXISTS (
+          SELECT 1
+          FROM dbo.UsuarioOAuthIdentidades WITH (UPDLOCK, HOLDLOCK)
+          WHERE Provedor = @Provedor
+            AND Subject = @Subject
+            AND RevogadoEm IS NULL
+        )
+          THROW 50124, N'OAUTH_IDENTITY_ALREADY_LINKED', 1;
+
+        INSERT INTO dbo.OAuthCadastroTokens
+          (Jti, Provedor, Subject, Email, EmailVerificado, EmailRelay, Nome, ExpiraEm)
+        VALUES
+          (CONVERT(uniqueidentifier, @Jti), @Provedor, @Subject, @Email, @EmailVerificado, @EmailRelay, @Nome, @ExpiraEm);
+      `);
+    } catch (err) {
+      const mapped = mapOAuthCadastroError(err);
+      if (mapped) throw mapped;
+      throw err;
+    }
+
+    const oauthCadastroToken = jwt.sign(
+      {
+        purpose: "oauth_signup",
+        jti,
+        provedor: provider,
+        sub: subject
+      },
+      ENV.JWT_SECRET,
+      { expiresIn: `${OAUTH_SIGNUP_TOKEN_TTL_MINUTES}m` }
+    );
+
+    return {
+      oauthCadastroToken,
+      expiraEm: expiraEm.toISOString(),
+      provedor: provider,
+      email,
+      emailVerificado,
+      emailRelay: isApplePrivateRelayEmail(email),
+      nome
+    };
+  },
+
+  validarOAuthCadastroToken(oauthCadastroToken) {
+    const token = String(oauthCadastroToken || "").trim();
+    if (!token) return null;
+    if (!ENV.JWT_SECRET) throw new Error("JWT_SECRET não configurado.");
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, ENV.JWT_SECRET);
+    } catch (err) {
+      if (err?.name === "TokenExpiredError") {
+        throw authHttpError("Sessão Apple/Google expirada. Reautorize para continuar.", 401, "OAUTH_SIGNUP_TOKEN_EXPIRED");
+      }
+      throw authHttpError("Sessão Apple/Google inválida. Reautorize para continuar.", 401, "OAUTH_SIGNUP_TOKEN_INVALID");
+    }
+
+    const provider = normalizeOAuthProvider(decoded?.provedor);
+    const subject = normalizeOAuthSubject(decoded?.sub);
+    const jti = String(decoded?.jti || "").trim();
+
+    if (decoded?.purpose !== "oauth_signup" || !jti || !provider || !subject) {
+      throw authHttpError("Sessão Apple/Google inválida. Reautorize para continuar.", 401, "OAUTH_SIGNUP_TOKEN_INVALID");
+    }
+
+    return { jti, provider, subject };
+  },
+
+  mapOAuthCadastroDbError(err) {
+    return mapOAuthCadastroError(err);
+  },
   /**
    * Login OAuth:
    * - busca usuário por identidade OAuth (provedor + subject) ou e-mail verificado
