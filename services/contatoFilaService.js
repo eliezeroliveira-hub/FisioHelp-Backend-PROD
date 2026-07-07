@@ -151,7 +151,7 @@ export async function claimProximo(usuario = null) {
   const result = await queryWithContext(ctx, () => {}, `
     ;WITH Proximo AS (
       SELECT TOP (1) *
-      FROM dbo.FilaContatoTransacional WITH (UPDLOCK, HOLDLOCK, READPAST, ROWLOCK)
+      FROM dbo.FilaContatoTransacional WITH (UPDLOCK, READPAST, ROWLOCK, READCOMMITTEDLOCK)
       WHERE Status IN (N'Pendente', N'FalhaTemporaria')
         AND Tentativas < MaxTentativas
         AND (ProximaTentativaEm IS NULL OR ProximaTentativaEm <= SYSDATETIME())
