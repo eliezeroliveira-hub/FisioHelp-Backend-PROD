@@ -4,6 +4,7 @@ import contatoProvider from '../providers/contatoProvider.js';
 import { sql } from '../config/dbConfig.js';
 import { log } from '../config/logger.js';
 import { queryWithContext } from './_queryWithContext.js';
+import contatoFilaService from './contatoFilaService.js';
 import { montarEmailRedefinicaoSenha } from './contatoTemplates.js';
 import { HttpError } from '../utils/httpError.js';
 import { getContatoSecret } from '../utils/contactSecret.js';
@@ -338,20 +339,6 @@ async function validarCodigoPendente({ usuario, email, codigo }) {
   return row;
 }
 
-async function cancelarRedefinicaoGerada({ id }) {
-  if (!id) return;
-  await queryWithContext(
-    null,
-    (req) => req.input('Id', sql.Int, id),
-    `
-      UPDATE dbo.RedefinicoesSenha
-      SET Status = N'Cancelado',
-          AtualizadoEm = SYSDATETIME()
-      WHERE Id = @Id
-        AND Status = N'Pendente';
-    `
-  );
-}
 
 export async function solicitarRedefinicaoSenha(payload = {}, reqLike = null) {
   const pedido = normalizarPedidoRedefinicao(payload);
@@ -464,33 +451,40 @@ export async function solicitarRedefinicaoSenha(payload = {}, reqLike = null) {
     throw err;
   }
 
-  try {
-    if (canal === 'Telefone') {
-      await contatoProvider.enviarCodigo({
-        canal: 'Telefone',
-        destino,
-        codigo,
-        texto: mensagemResetWhatsApp(codigo),
-      });
-    } else {
-      const conteudo = montarEmailRedefinicaoSenha({
-        nome: usuario.Nome,
-        codigo,
-        expiraEmMinutos: RESET_EXPIRATION_MINUTES,
-      });
+  if (canal === 'Telefone') {
+    await contatoFilaService.enfileirarCodigo({
+      tipo: 'RedefinicaoSenha',
+      canal: 'Telefone',
+      destino,
+      texto: mensagemResetWhatsApp(codigo),
+      payload: {
+        resetId,
+        usuarioTipo: usuario.UsuarioTipo,
+        usuarioId: usuario.Id,
+        origem: 'auth.senha.esqueci',
+      },
+    });
+  } else {
+    const conteudo = montarEmailRedefinicaoSenha({
+      nome: usuario.Nome,
+      codigo,
+      expiraEmMinutos: RESET_EXPIRATION_MINUTES,
+    });
 
-      await contatoProvider.enviarCodigo({
-        canal: 'Email',
-        destino,
-        codigo,
-        assunto: conteudo.assunto,
-        html: conteudo.corpoHtml,
-        texto: conteudo.corpoTexto,
-      });
-    }
-  } catch (err) {
-    await cancelarRedefinicaoGerada({ id: resetId });
-    throw new HttpError(503, 'Não foi possível enviar o código de redefinição. Tente novamente.');
+    await contatoFilaService.enfileirarCodigo({
+      tipo: 'RedefinicaoSenha',
+      canal: 'Email',
+      destino,
+      assunto: conteudo.assunto,
+      html: conteudo.corpoHtml,
+      texto: conteudo.corpoTexto,
+      payload: {
+        resetId,
+        usuarioTipo: usuario.UsuarioTipo,
+        usuarioId: usuario.Id,
+        origem: 'auth.senha.esqueci',
+      },
+    });
   }
 
   return { sucesso: true, mensagem: GENERIC_MESSAGE };

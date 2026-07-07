@@ -5,39 +5,47 @@ import chalk from 'chalk';
 import 'winston-daily-rotate-file';
 import { ENV } from './env.js';
 
-// 📁 Diretório de logs
-const logDir = path.resolve('logs');
-fs.mkdirSync(logDir, { recursive: true });
+const fileTransports = [];
+let fileLoggingDisabledReason = null;
 
-// 📆 Rotação diária de logs (1 arquivo/dia)
-const dailyRotateTransport = new winston.transports.DailyRotateFile({
-  dirname: logDir,
-  filename: '%DATE%.log',
-  datePattern: 'YYYY-MM-DD',
-  zippedArchive: false,
-  maxSize: '10m',
-  maxFiles: '14d',
-  level: ENV.LOG_LEVEL || 'info',
-  format: winston.format.combine(
-    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-    winston.format.json()
-  )
-});
+try {
+  // 📁 Diretório de logs
+  const logDir = path.resolve(process.env.LOG_DIR || 'logs');
+  fs.mkdirSync(logDir, { recursive: true });
 
-// ❗ Canal de logs exclusivo para erros críticos
-const errorFileTransport = new winston.transports.File({
-  dirname: logDir,
-  filename: 'error.log',
-  level: 'error',
-  maxsize: 5 * 1024 * 1024, // 5MB
-  maxFiles: 5,
-  tailable: true,
-  format: winston.format.combine(
-    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-    winston.format.json()
-  )
-});
+  // 📆 Rotação diária de logs (1 arquivo/dia)
+  const dailyRotateTransport = new winston.transports.DailyRotateFile({
+    dirname: logDir,
+    filename: '%DATE%.log',
+    datePattern: 'YYYY-MM-DD',
+    zippedArchive: false,
+    maxSize: '10m',
+    maxFiles: '14d',
+    level: ENV.LOG_LEVEL || 'info',
+    format: winston.format.combine(
+      winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+      winston.format.json()
+    )
+  });
 
+  // ❗ Canal de logs exclusivo para erros críticos
+  const errorFileTransport = new winston.transports.File({
+    dirname: logDir,
+    filename: 'error.log',
+    level: 'error',
+    maxsize: 5 * 1024 * 1024, // 5MB
+    maxFiles: 5,
+    tailable: true,
+    format: winston.format.combine(
+      winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+      winston.format.json()
+    )
+  });
+
+  fileTransports.push(dailyRotateTransport, errorFileTransport);
+} catch (error) {
+  fileLoggingDisabledReason = error?.message || String(error);
+}
 // 🎨 Formato colorido e contextual para o console
 const consoleTransport = new winston.transports.Console({
   level: ENV.LOG_LEVEL || 'info',
@@ -71,9 +79,15 @@ export const logger = winston.createLogger({
     winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
     winston.format.json()
   ),
-  transports: [dailyRotateTransport, errorFileTransport, consoleTransport],
+  transports: [...fileTransports, consoleTransport],
   exitOnError: false
 });
+
+if (fileLoggingDisabledReason) {
+  logger.warn('Logs em arquivo desativados; usando apenas console.', {
+    erro: fileLoggingDisabledReason
+  });
+}
 
 /**
  * 🔧 Função auxiliar compatível com sua função anterior

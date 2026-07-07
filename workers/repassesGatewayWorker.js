@@ -37,7 +37,7 @@ function usuarioSistema() {
   return { tipo: 'Admin', id: Number(ENV.SYSTEM_ADMIN_ID ?? 1) };
 }
 
-async function tick() {
+export async function tick() {
   if (running) return;
   running = true;
 
@@ -136,6 +136,7 @@ export function stopRepassesGatewayWorker() {
 }
 
 export default {
+  tick,
   startRepassesGatewayWorker,
   stopRepassesGatewayWorker,
 };
