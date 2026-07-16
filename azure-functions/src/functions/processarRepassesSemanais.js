@@ -2,8 +2,8 @@ import { app } from '@azure/functions';
 import { runSqlJob } from '../shared/jobRunner.js';
 
 app.timer('processarRepassesSemanais', {
-  // Segunda 02:00 BRT = segunda 05:00 UTC.
-  schedule: '0 0 5 * * 1',
+  // Domingo 23:30 BRT = segunda 02:30 UTC.
+  schedule: '0 30 2 * * 1',
   handler: async (_timer, context) => runSqlJob({
     jobName: 'Processar_Repasses_Semanais',
     execute: async ({ pool, sql, agoraBrasil }) => {

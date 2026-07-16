@@ -44,12 +44,11 @@ if (isProd && !googleClientId && !googleClientIds) {
 }
 const appleClientId = requiredInProduction('APPLE_CLIENT_ID');
 
-// Gateway webhook/admin de sistema: obrigatório em produção.
-const gatewayWebhookSecret = requiredInProduction('GATEWAY_WEBHOOK_SECRET');
+// Webhook legado/stand-by; o fluxo Asaas usa ASAAS_WEBHOOK_TOKEN.
+const gatewayWebhookSecretValue = optionalEnv('GATEWAY_WEBHOOK_SECRET');
+const gatewayWebhookSecret =
+  gatewayWebhookSecretValue?.toLowerCase() === 'false' ? null : gatewayWebhookSecretValue;
 const systemAdminId = parsePositiveIntEnv('SYSTEM_ADMIN_ID', 1);
-if (isProd && !gatewayWebhookSecret) {
-  throw new Error('GATEWAY_WEBHOOK_SECRET não configurado.');
-}
 if (isProd && (!Number.isInteger(systemAdminId) || systemAdminId <= 0)) {
   throw new Error('SYSTEM_ADMIN_ID inválido.');
 }
