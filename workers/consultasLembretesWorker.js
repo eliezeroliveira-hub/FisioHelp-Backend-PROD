@@ -208,15 +208,38 @@ async function buscarPendencias(usuario) {
   return result.recordset || [];
 }
 
-function montarDados(row) {
-  return {
+function montarDados(row, canal = 'push') {
+  const destinatarioPapel = String(row.DestinatarioPapel || row.UsuarioTipo);
+  const dados = {
     tipo: 'consulta_lembrete_24h',
     consultaId: Number(row.ConsultaId),
     pacienteId: Number(row.PacienteId),
     fisioterapeutaId: Number(row.FisioterapeutaId),
     dataHoraChave: row.DataHoraChave,
-    destinatarioPapel: String(row.DestinatarioPapel || row.UsuarioTipo),
+    destinatarioPapel,
     origem: 'consultasLembretesWorker',
+  };
+
+  if (canal !== 'whatsapp') return dados;
+
+  const destinatarioNome = destinatarioPapel === 'Paciente'
+    ? primeiroNome(row.PacienteNome, 'Paciente')
+    : primeiroNome(row.FisioterapeutaNome, 'Fisioterapeuta');
+  const contraparteNome = destinatarioPapel === 'Paciente'
+    ? limitarTexto(texto(row.FisioterapeutaNome, 'Fisioterapeuta'))
+    : limitarTexto(texto(row.PacienteNome, 'Paciente'));
+
+  return {
+    ...dados,
+    whatsappTemplate: {
+      chave: 'lembrete_consulta_24h',
+      variaveis: {
+        1: destinatarioNome,
+        2: contraparteNome,
+        3: texto(row.DataTexto, 'data informada no aplicativo'),
+        4: texto(row.HoraTexto, 'horário informado no aplicativo'),
+      },
+    },
   };
 }
 
@@ -229,7 +252,7 @@ function montarNotificacao(row, canal = 'push') {
   const nomeFisioterapeutaCompleto = limitarTexto(texto(row.FisioterapeutaNome, 'o fisioterapeuta'));
   const data = texto(row.DataTexto, 'data informada no aplicativo');
   const hora = texto(row.HoraTexto, 'horário informado no aplicativo');
-  const dados = montarDados(row);
+  const dados = montarDados(row, canal);
 
   if (destinatarioPapel === 'Paciente') {
     if (canal === 'email') {

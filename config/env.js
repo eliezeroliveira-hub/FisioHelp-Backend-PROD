@@ -98,6 +98,10 @@ const twilioAccountSid = optionalEnv('TWILIO_ACCOUNT_SID');
 const twilioAuthToken = optionalEnv('TWILIO_AUTH_TOKEN');
 const twilioWhatsappFrom = optionalEnv('TWILIO_WHATSAPP_FROM') || 'whatsapp:+14155238886';
 const twilioWhatsappStatusCallbackUrl = optionalEnv('TWILIO_WHATSAPP_STATUS_CALLBACK_URL');
+const twilioWhatsappContentSidLembreteConsulta24h = optionalEnv(
+  'TWILIO_WHATSAPP_CONTENT_SID_LEMBRETE_CONSULTA_24H'
+);
+const twilioWhatsappContentSidOtp = optionalEnv('TWILIO_WHATSAPP_CONTENT_SID_OTP');
 const contatoPublicoDestino = optionalEnv('CONTATO_PUBLICO_DESTINO') || 'suporte@fisiohelp.com.br';
 const azureStorageConnectionString = optionalEnv('AZURE_STORAGE_CONNECTION_STRING');
 const azureStorageContainer = optionalEnv('AZURE_STORAGE_CONTAINER') || 'uploads';
@@ -171,6 +175,8 @@ export const ENV = {
   TWILIO_AUTH_TOKEN: twilioAuthToken,
   TWILIO_WHATSAPP_FROM: twilioWhatsappFrom,
   TWILIO_WHATSAPP_STATUS_CALLBACK_URL: twilioWhatsappStatusCallbackUrl,
+  TWILIO_WHATSAPP_CONTENT_SID_LEMBRETE_CONSULTA_24H: twilioWhatsappContentSidLembreteConsulta24h,
+  TWILIO_WHATSAPP_CONTENT_SID_OTP: twilioWhatsappContentSidOtp,
   CONTATO_PUBLICO_DESTINO: contatoPublicoDestino,
   FILE_STORAGE_PROVIDER: fileStorageProvider,
   AZURE_STORAGE_CONNECTION_STRING: azureStorageConnectionString,

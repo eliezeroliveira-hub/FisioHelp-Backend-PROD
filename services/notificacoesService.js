@@ -724,6 +724,22 @@ function montarMensagemWhatsAppItem(item) {
   return mensagem || titulo;
 }
 
+function montarTemplateWhatsAppItem(item) {
+  const dados = parseDadosJsonSeguro(item?.DadosJson);
+  const template = dados?.whatsappTemplate;
+  if (!template || typeof template !== 'object') return {};
+
+  if (String(template.chave || '').trim() === 'lembrete_consulta_24h') {
+    return {
+      contentSid: ENV.TWILIO_WHATSAPP_CONTENT_SID_LEMBRETE_CONSULTA_24H,
+      contentVariables: template.variaveis,
+      templateObrigatorio: true,
+    };
+  }
+
+  return { templateObrigatorio: true };
+}
+
 async function processarWhatsappItem(item, usuario = null) {
   const filaId = normalizarIdPositivo(item?.Id, 'filaId');
   const resolucao = await resolverTelefoneUsuario(item.UsuarioTipo, item.UsuarioId);
@@ -738,6 +754,7 @@ async function processarWhatsappItem(item, usuario = null) {
     resultado = await enviarWhatsApp({
       destinatario: resolucao.telefone,
       mensagem: montarMensagemWhatsAppItem(item),
+      ...montarTemplateWhatsAppItem(item),
     });
   } catch (erro) {
     resultado = {

@@ -260,6 +260,9 @@ async function enviarCodigo({ canal, destino, codigo, assunto, html, texto }) {
     const resultado = await whatsappProvider.enviarWhatsApp({
       destinatario: destino,
       mensagem,
+      contentSid: ENV.TWILIO_WHATSAPP_CONTENT_SID_OTP,
+      contentVariables: { 1: String(codigo) },
+      templateObrigatorio: isWhatsAppProviderReal,
     });
 
     if (resultado.resultado !== 'sucesso') {

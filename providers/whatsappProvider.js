@@ -42,6 +42,24 @@ function prepararMensagem(mensagem) {
   return String(mensagem || '').replace(/\r\n/g, '\n').trim();
 }
 
+function prepararContentSid(value) {
+  const sid = String(value || '').trim();
+  if (!sid) return null;
+  return /^HX[a-f0-9]{32}$/i.test(sid) ? sid : null;
+}
+
+function prepararContentVariables(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+
+  const variables = Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => /^\d+$/.test(String(key)))
+      .map(([key, variableValue]) => [String(key), String(variableValue ?? '')])
+  );
+
+  return Object.keys(variables).length > 0 ? JSON.stringify(variables) : null;
+}
+
 function isNetworkError(error) {
   const code = String(error?.code || error?.name || '').trim();
   return [
@@ -84,7 +102,7 @@ function erroTwilioParaResultado(error) {
   }
 
   if (
-    [20003, 20404, 21212, 21606, 21612, 21659, 63007, 63016, 63018].includes(code) ||
+    [20003, 20404, 21212, 21606, 21612, 21659, 63007, 63016, 63018, 63028].includes(code) ||
     status === 400 ||
     status === 401 ||
     status === 403 ||
@@ -105,17 +123,35 @@ function erroConfig(message) {
 }
 
 // resultado: 'sucesso' | 'invalido' | 'tempFalha' | 'permFalha'
-export async function enviarWhatsApp({ destinatario, mensagem, statusCallbackUrl } = {}) {
+export async function enviarWhatsApp({
+  destinatario,
+  mensagem,
+  statusCallbackUrl,
+  contentSid,
+  contentVariables,
+  templateObrigatorio = false,
+} = {}) {
   const to = normalizarWhatsAppAddress(destinatario);
   const body = prepararMensagem(mensagem);
   const from = normalizarWhatsAppAddress(ENV.TWILIO_WHATSAPP_FROM);
   const callbackUrl = String(statusCallbackUrl || ENV.TWILIO_WHATSAPP_STATUS_CALLBACK_URL || '').trim();
+  const contentSidInformado = String(contentSid || '').trim();
+  const templateSid = prepararContentSid(contentSidInformado);
+  const templateVariables = prepararContentVariables(contentVariables);
 
   if (!to) {
     return { resultado: 'invalido', erro: 'Destinatário de WhatsApp vazio ou inválido.' };
   }
 
-  if (!body) {
+  if (contentSidInformado && !templateSid) {
+    return erroConfig('Content SID do WhatsApp inválido. Use um SID iniciado por HX.');
+  }
+
+  if (isWhatsAppProviderReal && templateObrigatorio && !templateSid) {
+    return erroConfig('Template WhatsApp obrigatório não configurado.');
+  }
+
+  if (!body && !templateSid) {
     return { resultado: 'permFalha', erro: 'Mensagem de WhatsApp vazia.' };
   }
 
@@ -123,6 +159,8 @@ export async function enviarWhatsApp({ destinatario, mensagem, statusCallbackUrl
     log('info', '[whatsapp:stub] envio simulado', {
       destinatario: mascararWhatsApp(to),
       tamanhoMensagem: body.length,
+      template: Boolean(templateSid),
+      contentSid: templateSid,
     });
 
     return { resultado: 'sucesso' };
@@ -144,7 +182,12 @@ export async function enviarWhatsApp({ destinatario, mensagem, statusCallbackUrl
     const payload = {
       from,
       to,
-      body,
+      ...(templateSid
+        ? {
+            contentSid: templateSid,
+            ...(templateVariables ? { contentVariables: templateVariables } : {}),
+          }
+        : { body }),
       ...(callbackUrl ? { statusCallback: callbackUrl } : {}),
     };
 
@@ -154,6 +197,8 @@ export async function enviarWhatsApp({ destinatario, mensagem, statusCallbackUrl
       destinatario: mascararWhatsApp(to),
       messageId: response?.sid || null,
       status: response?.status || null,
+      template: Boolean(templateSid),
+      contentSid: templateSid,
     });
 
     return {
