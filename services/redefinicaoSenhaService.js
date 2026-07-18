@@ -461,6 +461,7 @@ export async function solicitarRedefinicaoSenha(payload = {}, reqLike = null) {
         resetId,
         usuarioTipo: usuario.UsuarioTipo,
         usuarioId: usuario.Id,
+        codigo,
         origem: 'auth.senha.esqueci',
       },
     });
@@ -482,6 +483,7 @@ export async function solicitarRedefinicaoSenha(payload = {}, reqLike = null) {
         resetId,
         usuarioTipo: usuario.UsuarioTipo,
         usuarioId: usuario.Id,
+        codigo,
         origem: 'auth.senha.esqueci',
       },
     });

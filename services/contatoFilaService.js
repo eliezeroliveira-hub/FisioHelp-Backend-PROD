@@ -73,6 +73,55 @@ function erroPermanente(erro) {
   );
 }
 
+function parsePayload(value) {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  try {
+    const parsed = JSON.parse(String(value));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    throw new Error('Payload inválido na fila de contato transacional.');
+  }
+}
+
+async function verificacaoContatoAindaPendente(item, payload, usuario = null) {
+  const usuarioTipo = String(payload?.usuarioTipo || '').trim();
+  const usuarioId = Number(payload?.usuarioId);
+  const codigoHashHex = String(payload?.codigoHashHex || '').trim().toLowerCase();
+  const canal = normalizarCanal(item?.Canal);
+  const destino = text(item?.Destino, 255);
+
+  if (
+    !['Paciente', 'Fisioterapeuta'].includes(usuarioTipo) ||
+    !Number.isInteger(usuarioId) ||
+    usuarioId <= 0 ||
+    !/^[a-f0-9]{64}$/.test(codigoHashHex) ||
+    !destino
+  ) {
+    throw new Error('Payload inválido para verificação de contato.');
+  }
+
+  const idColumn = usuarioTipo === 'Paciente' ? 'PacienteId' : 'FisioterapeutaId';
+  const codigoHash = Buffer.from(codigoHashHex, 'hex');
+  const result = await queryWithContext(safeUser(usuario), (req) => {
+    req.input('UsuarioId', sql.Int, usuarioId);
+    req.input('Canal', sql.NVarChar(40), canal);
+    req.input('Destino', sql.NVarChar(510), destino);
+    req.input('CodigoHash', sql.VarBinary(32), codigoHash);
+  }, `
+    SELECT TOP 1 Id
+    FROM dbo.VerificacoesContato
+    WHERE ${idColumn} = @UsuarioId
+      AND Canal = @Canal
+      AND Destino = @Destino
+      AND CodigoHash = @CodigoHash
+      AND Status = N'Pendente'
+      AND ExpiraEm > SYSDATETIME();
+  `);
+
+  return Boolean(result?.recordset?.[0]?.Id);
+}
+
 export async function filaDisponivel(usuario = null) {
   const ctx = safeUser(usuario);
   const result = await queryWithContext(ctx, () => {}, `
@@ -229,10 +278,21 @@ export async function marcarFalhaTemporaria(item, erro, usuario = null) {
 
 export async function processarItem(item, usuario = null) {
   const canal = normalizarCanal(item?.Canal);
+  const payload = parsePayload(item?.PayloadJson);
+
+  if (String(item?.Tipo || '').trim() === 'VerificacaoContato') {
+    const aindaPendente = await verificacaoContatoAindaPendente(item, payload, usuario);
+    if (!aindaPendente) {
+      const resultadoIgnorado = { ok: true, ignorado: true, motivo: 'codigo_substituido_ou_expirado' };
+      await marcarProcessado(item, resultadoIgnorado, usuario);
+      return resultadoIgnorado;
+    }
+  }
+
   const resultado = await contatoProvider.enviarCodigo({
     canal,
     destino: item?.Destino,
-    codigo: '',
+    codigo: String(payload?.codigo || ''),
     assunto: item?.Assunto,
     html: item?.Html,
     texto: item?.Texto,

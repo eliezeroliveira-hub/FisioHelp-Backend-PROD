@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import contatoProvider from '../providers/contatoProvider.js';
 import { sql } from '../config/dbConfig.js';
 import { queryWithContext } from './_queryWithContext.js';
+import contatoFilaService from './contatoFilaService.js';
 import { HttpError } from '../utils/httpError.js';
 import { getContatoSecret } from '../utils/contactSecret.js';
 import { normalizeEmail } from '../utils/identityValidators.js';
@@ -238,7 +239,7 @@ export async function solicitarVerificacaoContatoInterna({
       SELECT TOP 1
         CAST(1 AS BIT) AS PodeEnviar,
         CAST(0 AS BIT) AS CodigoJaEnviado,
-        CAST(NULL AS DATETIME2(7)) AS PodeReenviarEm,
+        DATEADD(SECOND, @CooldownSegundos, UltimoEnvioEm) AS PodeReenviarEm,
         ExpiraEm
       FROM dbo.VerificacoesContato
       WHERE ${idColumn} = @UsuarioId
@@ -290,28 +291,35 @@ export async function solicitarVerificacaoContatoInterna({
     );
   };
 
-  let envio = null;
   try {
     const textoEnvio = canalNorm === 'Telefone'
       ? montarTextoWhatsAppVerificacao({ codigo, expiraEmMinutos: minutos })
       : (conteudo.corpoTexto || conteudo.texto || texto);
 
-    envio = await contatoProvider.enviarCodigo({
+    const itemFila = await contatoFilaService.enfileirarCodigo({
+      tipo: 'VerificacaoContato',
       canal: canalNorm,
       destino: destinoNormalizado,
-      codigo,
       assunto: canalNorm === 'Telefone' ? null : (conteudo.assunto || assunto),
       html: canalNorm === 'Telefone' ? null : (conteudo.corpoHtml || conteudo.html || html),
       texto: textoEnvio,
-    });
+      payload: {
+        usuarioTipo: tipo,
+        usuarioId: id,
+        canal: canalNorm,
+        destino: destinoNormalizado,
+        codigo,
+        codigoHashHex: codigoHash.toString('hex'),
+        origem: 'verificacao.contato',
+      },
+    }, usuario);
+
+    if (!itemFila?.Id) {
+      throw new Error('Não foi possível registrar o envio na fila transacional.');
+    }
   } catch (err) {
     await cancelarCodigoPendenteGerado();
     throw err;
-  }
-
-  if (!envio?.ok) {
-    await cancelarCodigoPendenteGerado();
-    throw new HttpError(503, 'Falha ao enviar código de verificação. Tente novamente.');
   }
 
   return {
@@ -320,7 +328,7 @@ export async function solicitarVerificacaoContatoInterna({
     expiraEm: row?.ExpiraEm || expiraEm,
     podeReenviarEm: row?.PodeReenviarEm || null,
     codigoJaEnviado: false,
-    ...(envio?.codigo ? { codigoDev: envio.codigo } : {}),
+    envioPendente: true,
   };
 }
 
