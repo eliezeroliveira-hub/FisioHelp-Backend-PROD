@@ -298,6 +298,142 @@ function formatConsultaFisioDetalhe(row) {
   };
 }
 
+async function garantirReembolsoNoShowFisioEnfileirado(consultaId, pacienteId, usuario) {
+  const result = await queryWithContext(usuario, (req) => {
+    req.input('ConsultaId', sql.Int, consultaId);
+    req.input('PacienteId', sql.Int, pacienteId);
+  }, `
+    SELECT TOP (1)
+      t.Id AS TransacaoId,
+      LTRIM(RTRIM(ISNULL(t.Status, N''))) AS TransacaoStatus,
+      t.GatewayPaymentId,
+      LTRIM(RTRIM(ISNULL(t.GatewayRefundStatus, N''))) AS GatewayRefundStatus,
+      t.ValorTotal AS Valor
+    FROM dbo.Transacoes t WITH (READCOMMITTEDLOCK)
+    WHERE t.ConsultaId = @ConsultaId
+      AND t.PacienteId = @PacienteId
+      AND LTRIM(RTRIM(ISNULL(t.Status, N''))) IN (N'Pago', N'Reembolsado')
+    ORDER BY t.Id DESC;
+  `);
+
+  const transacao = result?.recordset?.[0] ?? null;
+  if (!transacao?.TransacaoId) {
+    throw new HttpError(409, 'Reembolso não disponível: transação paga não encontrada para esta consulta.');
+  }
+
+  const gatewayRefundStatus = String(transacao.GatewayRefundStatus || '').trim().toUpperCase();
+  if (gatewayRefundStatus === 'DONE') {
+    return {
+      confirmado: true,
+      enfileirado: false,
+      fila: null,
+      transacaoId: Number(transacao.TransacaoId),
+    };
+  }
+
+  const fila = await reembolsosGatewayFilaService.enfileirarReembolso({
+    transacaoId: transacao.TransacaoId,
+    consultaId,
+    origem: 'Admin',
+    provider: 'asaas',
+    gatewayPaymentId: transacao.GatewayPaymentId ?? null,
+    valor: transacao.Valor ?? null,
+    motivo: `Reembolso da consulta ${consultaId} por no-show do fisioterapeuta`,
+  }, usuario);
+
+  return {
+    confirmado: false,
+    enfileirado: true,
+    fila,
+    transacaoId: Number(transacao.TransacaoId),
+  };
+}
+
+async function garantirReembolsoCancelamentoPacienteEnfileirado(
+  consultaId,
+  pacienteId,
+  usuario
+) {
+  const result = await queryWithContext(usuario, (req) => {
+    req.input('ConsultaId', sql.Int, consultaId);
+    req.input('PacienteId', sql.Int, pacienteId);
+  }, `
+    SELECT TOP (1)
+      c.Status AS ConsultaStatus,
+      t.Id AS TransacaoId,
+      LTRIM(RTRIM(ISNULL(t.Status, N''))) AS TransacaoStatus,
+      LTRIM(RTRIM(ISNULL(t.MetodoPagamento, N''))) AS MetodoPagamento,
+      t.GatewayPaymentId,
+      LTRIM(RTRIM(ISNULL(t.GatewayRefundStatus, N''))) AS GatewayRefundStatus,
+      t.GatewayRefundDescricao,
+      t.GatewayUltimoEvento,
+      t.ValorTotal AS Valor
+    FROM dbo.Consultas c WITH (READCOMMITTEDLOCK)
+    INNER JOIN dbo.Transacoes t WITH (READCOMMITTEDLOCK)
+      ON t.ConsultaId = c.Id
+     AND t.PacienteId = c.PacienteId
+    WHERE c.Id = @ConsultaId
+      AND c.PacienteId = @PacienteId
+      AND LTRIM(RTRIM(ISNULL(t.Status, N''))) IN (N'Pago', N'Reembolsado')
+      AND LTRIM(RTRIM(ISNULL(t.MetodoPagamento, N''))) NOT IN (N'Pacote', N'CreditoCarteira')
+    ORDER BY t.Id DESC;
+  `);
+
+  const transacao = result?.recordset?.[0] ?? null;
+  if (!transacao?.TransacaoId) {
+    throw new HttpError(409, 'Reembolso não disponível: transação paga não encontrada para esta consulta.');
+  }
+
+  const consultaStatus = String(transacao.ConsultaStatus || '').trim();
+  const gatewayRefundStatus = String(transacao.GatewayRefundStatus || '').trim().toUpperCase();
+  const gatewayUltimoEvento = String(transacao.GatewayUltimoEvento || '').trim().toUpperCase();
+  const solicitacaoRegistrada =
+    consultaStatus === STATUS.CANCELADA &&
+    (
+      gatewayUltimoEvento === 'FISIOHELP_CANCELAMENTO_ARREPENDIMENTO' ||
+      gatewayRefundStatus.length > 0
+    );
+
+  if (!solicitacaoRegistrada) {
+    throw new HttpError(409, 'Não existe solicitação de reembolso registrada para este cancelamento.');
+  }
+
+  if (gatewayRefundStatus === 'DONE') {
+    return {
+      confirmado: true,
+      enfileirado: false,
+      fila: null,
+      transacaoId: Number(transacao.TransacaoId),
+    };
+  }
+
+  if (['PARTIAL', 'DENIED', 'REFUSED', 'CANCELLED', 'CANCELED'].includes(gatewayRefundStatus)) {
+    throw new HttpError(
+      409,
+      `O reembolso está com status ${gatewayRefundStatus} no gateway e requer análise administrativa.`
+    );
+  }
+
+  const fila = await reembolsosGatewayFilaService.enfileirarReembolso({
+    transacaoId: transacao.TransacaoId,
+    consultaId,
+    origem: 'Arrependimento',
+    provider: 'asaas',
+    gatewayPaymentId: transacao.GatewayPaymentId ?? null,
+    valor: transacao.Valor ?? null,
+    motivo:
+      transacao.GatewayRefundDescricao ||
+      'Cancelamento por arrependimento de 7 dias.',
+  }, usuario);
+
+  return {
+    confirmado: false,
+    enfileirado: true,
+    fila,
+    transacaoId: Number(transacao.TransacaoId),
+  };
+}
+
 async function prepararCancelamentoReembolsoAsaasArrependimento(consultaId, pacienteId, motivo, usuario) {
   const result = await queryWithContext(usuario, (req) => {
     req.input('ConsultaId', sql.Int, consultaId);
@@ -3307,6 +3443,7 @@ async reagendar(consultaId, body, usuario) {
     }
 
     const pagamentoViaPlataforma = Number(pagamentoCtx.PagamentoViaPlataforma ?? 0) === 1;
+    const statusConsultaAtual = String(pagamentoCtx.Status || '').trim();
     const statusPagamentoAtual = String(pagamentoCtx.StatusPagamento || '').trim();
     const temTransacaoPaga = !!pagamentoCtx.TemTransacaoPaga;
     const temCreditoLivre = !!pagamentoCtx.TemCreditoLivre;
@@ -3351,7 +3488,9 @@ async reagendar(consultaId, body, usuario) {
         SELECT TOP (1)
           t.Id AS TransacaoId,
           LTRIM(RTRIM(ISNULL(t.Status, N''))) AS Status,
-          LTRIM(RTRIM(ISNULL(t.MetodoPagamento, N''))) AS MetodoPagamento
+          LTRIM(RTRIM(ISNULL(t.MetodoPagamento, N''))) AS MetodoPagamento,
+          LTRIM(RTRIM(ISNULL(t.GatewayRefundStatus, N''))) AS GatewayRefundStatus,
+          LTRIM(RTRIM(ISNULL(t.GatewayUltimoEvento, N''))) AS GatewayUltimoEvento
         FROM dbo.Transacoes t
         WHERE t.ConsultaId = @ConsultaId
           AND t.PacienteId = @PacienteId
@@ -3362,6 +3501,8 @@ async reagendar(consultaId, body, usuario) {
       const transacaoId = tx?.TransacaoId ?? null;
       const statusTx = tx?.Status ?? null;
       const metodoPagamento = tx?.MetodoPagamento ?? null;
+      const gatewayRefundStatus = String(tx?.GatewayRefundStatus || '').trim().toUpperCase();
+      const gatewayUltimoEvento = String(tx?.GatewayUltimoEvento || '').trim().toUpperCase();
 
       if (!transacaoId) {
         throw new HttpError(
@@ -3384,6 +3525,38 @@ async reagendar(consultaId, body, usuario) {
         );
       }
 
+      const reembolsoJaRegistrado =
+        statusConsultaAtual === STATUS.CANCELADA &&
+        (
+          gatewayUltimoEvento === 'FISIOHELP_CANCELAMENTO_ARREPENDIMENTO' ||
+          gatewayRefundStatus.length > 0
+        );
+
+      if (reembolsoJaRegistrado) {
+        const recuperacao = await garantirReembolsoCancelamentoPacienteEnfileirado(
+          cid,
+          Number(usuario.id),
+          usuario
+        );
+
+        return {
+          Sucesso: true,
+          ConsultaId: cid,
+          OpcaoReembolso: 'Reembolso',
+          DataCompra: null,
+          PagamentoViaPlataforma: true,
+          SemReembolso: false,
+          ReembolsoFilaId: recuperacao.fila?.Id ?? null,
+          ReembolsoGatewayStatus:
+            recuperacao.confirmado ? 'DONE' : (recuperacao.fila?.Status ?? 'Pendente'),
+          ReembolsoConfirmado: recuperacao.confirmado,
+          TransacaoId: recuperacao.transacaoId,
+          Mensagem: recuperacao.confirmado
+            ? 'Consulta cancelada e reembolso já confirmado pelo gateway.'
+            : 'Consulta já estava cancelada e o reembolso foi garantido na fila de processamento.'
+        };
+      }
+
       if (statusTx !== 'Pago') {
         throw new HttpError(
           400,
@@ -3398,15 +3571,12 @@ async reagendar(consultaId, body, usuario) {
         usuario
       );
 
-      const filaReembolso = await reembolsosGatewayFilaService.enfileirarReembolso(
-        {
-          transacaoId: row?.TransacaoId ?? transacaoId,
-          consultaId: cid,
-          origem: 'Arrependimento',
-          motivo: motivo ?? 'Cancelamento por arrependimento de 7 dias.'
-        },
+      const reembolso = await garantirReembolsoCancelamentoPacienteEnfileirado(
+        cid,
+        Number(usuario.id),
         usuario
       );
+      const filaReembolso = reembolso.fila;
 
       await registrarCancelamentoLog({
         usuario,
@@ -3426,8 +3596,9 @@ async reagendar(consultaId, body, usuario) {
         PagamentoViaPlataforma: row?.PagamentoViaPlataforma ?? true,
         SemReembolso: false,
         ReembolsoFilaId: filaReembolso?.Id ?? null,
-        ReembolsoGatewayStatus: filaReembolso?.Status ?? 'Pendente',
-        ReembolsoConfirmado: false,
+        ReembolsoGatewayStatus:
+          reembolso.confirmado ? 'DONE' : (filaReembolso?.Status ?? 'Pendente'),
+        ReembolsoConfirmado: reembolso.confirmado,
         TransacaoId: row?.TransacaoId ?? transacaoId,
         Mensagem: 'Consulta cancelada e reembolso enfileirado para processamento automático.'
       };
@@ -3695,6 +3866,14 @@ async decidirNoShowFisio(id, body, usuario) {
   // Se opcoesNoShowFisio já veio "travado" por decisão anterior:
   if (opcoes?.DecisaoFinal) {
     if (opcoes.DecisaoFinal === opcao) {
+      if (opcao === 'Reembolso') {
+        await garantirReembolsoNoShowFisioEnfileirado(
+          consultaId,
+          Number(usuario.id),
+          usuario
+        );
+      }
+
       return {
         Sucesso: true,
         ConsultaId: consultaId,
@@ -3895,12 +4074,18 @@ async decidirNoShowFisio(id, body, usuario) {
         DECLARE
           @TransacaoId INT = NULL,
           @TransacaoStatus NVARCHAR(60) = NULL,
-          @MetodoPagamentoTransacao NVARCHAR(40) = NULL;
+          @MetodoPagamentoTransacao NVARCHAR(40) = NULL,
+          @GatewayPaymentIdTransacao NVARCHAR(100) = NULL,
+          @GatewayRefundStatusTransacao NVARCHAR(60) = NULL,
+          @ValorTransacao DECIMAL(10,2) = NULL;
 
         SELECT TOP (1)
           @TransacaoId = t.Id,
           @TransacaoStatus = LTRIM(RTRIM(ISNULL(t.Status, N''))),
-          @MetodoPagamentoTransacao = LTRIM(RTRIM(ISNULL(t.MetodoPagamento, N'')))
+          @MetodoPagamentoTransacao = LTRIM(RTRIM(ISNULL(t.MetodoPagamento, N''))),
+          @GatewayPaymentIdTransacao = t.GatewayPaymentId,
+          @GatewayRefundStatusTransacao = LTRIM(RTRIM(ISNULL(t.GatewayRefundStatus, N''))),
+          @ValorTransacao = t.ValorTotal
         FROM dbo.Transacoes t WITH (UPDLOCK, HOLDLOCK)
         WHERE t.ConsultaId = @ConsultaId
           AND t.PacienteId = @PacienteId
@@ -3972,11 +4157,12 @@ async decidirNoShowFisio(id, body, usuario) {
           END
         END
 
-        IF @TransacaoStatus = N'Reembolsado'
+        IF @TransacaoStatus = N'Reembolsado' AND @GatewayRefundStatusTransacao = N'DONE'
         BEGIN
           UPDATE dbo.Consultas
             SET StatusPagamento = N'Reembolsado'
-          WHERE Id = @ConsultaId;
+          WHERE Id = @ConsultaId
+            AND StatusPagamento <> N'Reembolsado';
 
           IF OBJECT_ID('dbo.ConsultasLogs', 'U') IS NOT NULL
           BEGIN
@@ -4001,18 +4187,12 @@ async decidirNoShowFisio(id, body, usuario) {
             @ConsultaId AS ConsultaId,
             N'Reembolso' AS Opcao,
             @TransacaoId AS TransacaoId,
-            N'Reembolso já estava aplicado (idempotente).' AS Mensagem;
+            @GatewayPaymentIdTransacao AS GatewayPaymentId,
+            @ValorTransacao AS Valor,
+            CAST(0 AS BIT) AS EnfileirarReembolso,
+            N'Reembolso já confirmado (idempotente).' AS Mensagem;
           RETURN;
         END
-
-        UPDATE dbo.Transacoes
-          SET Status = N'Reembolsado'
-        WHERE Id = @TransacaoId
-          AND LTRIM(RTRIM(ISNULL(Status, N''))) = N'Pago';
-
-        UPDATE dbo.Consultas
-          SET StatusPagamento = N'Reembolsado'
-        WHERE Id = @ConsultaId;
 
         IF OBJECT_ID('dbo.ConsultasLogs', 'U') IS NOT NULL
         BEGIN
@@ -4037,6 +4217,9 @@ async decidirNoShowFisio(id, body, usuario) {
           @ConsultaId AS ConsultaId,
           N'Reembolso' AS Opcao,
           @TransacaoId AS TransacaoId,
+          @GatewayPaymentIdTransacao AS GatewayPaymentId,
+          @ValorTransacao AS Valor,
+          CAST(1 AS BIT) AS EnfileirarReembolso,
           N'Estorno solicitado.' AS Mensagem;
 
       END TRY
@@ -4058,7 +4241,15 @@ async decidirNoShowFisio(id, body, usuario) {
       END CATCH
     `);
 
-    return r?.recordset?.[0] ?? { Sucesso: true, ConsultaId: consultaId, Opcao: 'Reembolso' };
+    const row = r?.recordset?.[0] ?? null;
+    if (Number(row?.EnfileirarReembolso ?? 0) === 1) {
+      await garantirReembolsoNoShowFisioEnfileirado(
+        consultaId,
+        Number(usuario.id),
+        usuario
+      );
+    }
+    return row ?? { Sucesso: true, ConsultaId: consultaId, Opcao: 'Reembolso' };
   }
 
   // =========================

@@ -139,6 +139,101 @@ function requireAdmin(usuario) {
   }
 }
 
+async function garantirReembolsoDisputaEnfileirado(disputaId, usuario) {
+  const result = await queryWithContext(
+    usuario,
+    (req) => {
+      req.input('DisputaId', sql.Int, Number(disputaId));
+    },
+    `
+      SELECT TOP (1)
+        d.Status AS DisputaStatus,
+        d.OpcaoReembolso,
+        d.ConsultaId,
+        t.Id AS TransacaoId,
+        t.GatewayPaymentId,
+        LTRIM(RTRIM(ISNULL(t.GatewayRefundStatus, N''))) AS GatewayRefundStatus,
+        t.GatewayRefundDescricao,
+        t.ValorTotal AS Valor
+      FROM dbo.DisputasConsultas d WITH (READCOMMITTEDLOCK)
+      OUTER APPLY (
+        SELECT TOP (1)
+          tx.Id,
+          tx.GatewayPaymentId,
+          tx.GatewayRefundStatus,
+          tx.GatewayRefundDescricao,
+          tx.ValorTotal
+        FROM dbo.Transacoes tx WITH (READCOMMITTEDLOCK)
+        WHERE tx.ConsultaId = d.ConsultaId
+          AND tx.PacienteId = d.PacienteId
+          AND LTRIM(RTRIM(ISNULL(tx.MetodoPagamento, N''))) NOT IN (N'Pacote', N'CreditoCarteira')
+          AND LTRIM(RTRIM(ISNULL(tx.Status, N''))) IN (N'Pago', N'Reembolsado')
+        ORDER BY tx.Id DESC
+      ) t
+      WHERE d.Id = @DisputaId;
+    `
+  );
+
+  const row = result?.recordset?.[0] ?? null;
+  if (!row) {
+    throw new HttpError(404, 'Disputa não encontrada.');
+  }
+
+  if (String(row.OpcaoReembolso || '').trim() !== 'Reembolso') {
+    return { aplicavel: false, confirmado: false, enfileirado: false, fila: null };
+  }
+
+  if (String(row.DisputaStatus || '').trim() !== 'ProcedentePaciente') {
+    throw new HttpError(409, 'A disputa ainda não foi concluída como procedente ao paciente.');
+  }
+
+  if (!row.TransacaoId) {
+    throw new HttpError(409, 'Reembolso não disponível: transação paga não encontrada para esta disputa.');
+  }
+
+  const gatewayRefundStatus = String(row.GatewayRefundStatus || '').trim().toUpperCase();
+  if (gatewayRefundStatus === 'DONE') {
+    return {
+      aplicavel: true,
+      confirmado: true,
+      enfileirado: false,
+      fila: null,
+      transacaoId: Number(row.TransacaoId),
+    };
+  }
+
+  if (['PARTIAL', 'DENIED', 'REFUSED', 'CANCELLED', 'CANCELED'].includes(gatewayRefundStatus)) {
+    throw new HttpError(
+      409,
+      `O reembolso da disputa está com status ${gatewayRefundStatus} e requer análise administrativa.`
+    );
+  }
+
+  const fila = await reembolsosGatewayFilaService.enfileirarReembolso(
+    {
+      transacaoId: row.TransacaoId,
+      consultaId: row.ConsultaId,
+      disputaId,
+      origem: 'Disputa',
+      provider: 'asaas',
+      gatewayPaymentId: row.GatewayPaymentId ?? null,
+      valor: row.Valor ?? null,
+      motivo:
+        row.GatewayRefundDescricao ||
+        `Disputa procedente ao paciente #${disputaId}`,
+    },
+    usuario
+  );
+
+  return {
+    aplicavel: true,
+    confirmado: false,
+    enfileirado: true,
+    fila,
+    transacaoId: Number(row.TransacaoId),
+  };
+}
+
 const disputasService = {
   // -------------------------------------------------------------------
   //  Listar disputas (Admin: todas com filtros | Paciente: apenas as suas)
@@ -565,6 +660,45 @@ const r = await queryWithContext(
 
     requireUser(usuario);
 
+    if (novoStatus === 'ProcedentePaciente') {
+      const estadoAtualResult = await queryWithContext(
+        usuario,
+        (req) => {
+          req.input('DisputaId', sql.Int, disputaId);
+        },
+        `
+          SELECT TOP (1)
+            Status,
+            OpcaoReembolso
+          FROM dbo.DisputasConsultas WITH (READCOMMITTEDLOCK)
+          WHERE Id = @DisputaId;
+        `
+      );
+
+      const estadoAtual = estadoAtualResult?.recordset?.[0] ?? null;
+      if (!estadoAtual) {
+        throw new HttpError(404, 'Disputa não encontrada.');
+      }
+
+      const statusAtual = String(estadoAtual.Status || '').trim();
+      const opcaoAtual = String(estadoAtual.OpcaoReembolso || '').trim();
+      if (STATUS_FINAIS.includes(statusAtual)) {
+        if (statusAtual === 'ProcedentePaciente' && opcaoAtual === 'Reembolso') {
+          const recuperacao = await garantirReembolsoDisputaEnfileirado(disputaId, usuario);
+          return {
+            sucesso: true,
+            mensagem: recuperacao.confirmado
+              ? `Disputa ${disputaId} já estava resolvida e o reembolso já foi confirmado.`
+              : `Disputa ${disputaId} já estava resolvida e o reembolso foi garantido na fila.`,
+            idempotente: true,
+            reembolsoFilaId: recuperacao.fila?.Id ?? null,
+          };
+        }
+
+        throw new HttpError(409, 'Disputa já foi resolvida anteriormente.');
+      }
+    }
+
     const motivoClawback = String(
       observacoes ?? `Clawback por disputa procedente ao paciente. DisputaId=${disputaId}`
     )
@@ -580,6 +714,11 @@ const r = await queryWithContext(
         req.input('UsuarioId', sql.Int, usuarioId || null);
         req.input('UsuarioTipo', sql.NVarChar(50), usuarioTipo);
         req.input('MotivoClawback', sql.NVarChar(500), motivoClawback);
+        req.input(
+          'MotivoReembolso',
+          sql.NVarChar(500),
+          `Disputa procedente ao paciente #${disputaId}`
+        );
       },
       `
         SET XACT_ABORT ON;
@@ -620,6 +759,55 @@ const r = await queryWithContext(
             @UsuarioId   = @UsuarioId,
             @UsuarioTipo = @UsuarioTipo;
 
+          -- A procedure legada marca a transação como Reembolsado antes do
+          -- gateway. Ainda dentro da mesma transação, restauramos Pago e
+          -- registramos somente a intenção durável do estorno externo.
+          IF @NovoStatus = N'ProcedentePaciente'
+             AND EXISTS (
+               SELECT 1
+               FROM dbo.DisputasConsultas
+               WHERE Id = @DisputaId
+                 AND LTRIM(RTRIM(ISNULL(OpcaoReembolso, N''))) = N'Reembolso'
+             )
+          BEGIN
+            DECLARE @TransacaoReembolsoId INT = NULL;
+
+            SELECT TOP (1) @TransacaoReembolsoId = t.Id
+            FROM dbo.Transacoes t WITH (UPDLOCK, HOLDLOCK)
+            INNER JOIN dbo.DisputasConsultas d
+              ON d.ConsultaId = t.ConsultaId
+             AND d.PacienteId = t.PacienteId
+            WHERE d.Id = @DisputaId
+              AND LTRIM(RTRIM(ISNULL(t.MetodoPagamento, N''))) NOT IN (N'Pacote', N'CreditoCarteira')
+              AND LTRIM(RTRIM(ISNULL(t.Status, N''))) IN (N'Pago', N'Reembolsado')
+            ORDER BY t.Id DESC;
+
+            IF @TransacaoReembolsoId IS NULL
+              THROW 51320, 'Transação paga não encontrada para o reembolso da disputa.', 1;
+
+            UPDATE dbo.Transacoes
+            SET Status = CASE
+                  WHEN LTRIM(RTRIM(ISNULL(Status, N''))) = N'Reembolsado'
+                   AND LTRIM(RTRIM(ISNULL(GatewayRefundStatus, N''))) <> N'DONE'
+                    THEN N'Pago'
+                  ELSE Status
+                END,
+                GatewayProvider = COALESCE(GatewayProvider, N'asaas'),
+                GatewayRefundStatus = CASE
+                  WHEN LTRIM(RTRIM(ISNULL(GatewayRefundStatus, N''))) IN (
+                    N'DONE', N'PARTIAL', N'PENDING', N'REQUESTED', N'IN_PROGRESS', N'QUEUED'
+                  ) THEN GatewayRefundStatus
+                  ELSE N'LOCAL_REQUESTED'
+                END,
+                GatewayRefundValor = COALESCE(GatewayRefundValor, ValorTotal),
+                GatewayRefundDescricao = COALESCE(NULLIF(GatewayRefundDescricao, N''), @MotivoReembolso),
+                GatewayRefundSolicitadoEm = COALESCE(GatewayRefundSolicitadoEm, SYSDATETIME()),
+                GatewayUltimoEvento = N'FISIOHELP_DISPUTA_REEMBOLSO_LOCAL_REQUESTED',
+                GatewayAtualizadoEm = SYSDATETIME(),
+                GatewayErroMensagem = NULL
+            WHERE Id = @TransacaoReembolsoId;
+          END
+
           UPDATE fc
           SET
             Status = @StatusChamado,
@@ -652,43 +840,7 @@ const r = await queryWithContext(
     );
 
     if (novoStatus === 'ProcedentePaciente') {
-      const reembolsoInfo = await queryWithContext(
-        usuario,
-        (req) => {
-          req.input('DisputaId', sql.Int, disputaId);
-        },
-        `
-          SELECT TOP (1)
-            d.ConsultaId,
-            d.OpcaoReembolso,
-            t.Id AS TransacaoId
-          FROM dbo.DisputasConsultas d
-          LEFT JOIN dbo.Transacoes t
-            ON t.ConsultaId = d.ConsultaId
-           AND t.PacienteId = d.PacienteId
-           AND LTRIM(RTRIM(ISNULL(t.MetodoPagamento, N''))) NOT IN (N'Pacote', N'CreditoCarteira')
-           AND LTRIM(RTRIM(ISNULL(t.Status, N''))) IN (N'Pago', N'Reembolsado')
-          WHERE d.Id = @DisputaId
-          ORDER BY t.Id DESC;
-        `
-      );
-
-      const reembolsoRow = reembolsoInfo?.recordset?.[0] ?? null;
-      const opcaoReembolso = String(reembolsoRow?.OpcaoReembolso ?? '').trim();
-      const transacaoId = Number(reembolsoRow?.TransacaoId ?? 0) || null;
-
-      if (opcaoReembolso === 'Reembolso' && transacaoId) {
-        await reembolsosGatewayFilaService.enfileirarReembolso(
-          {
-            transacaoId,
-            consultaId: reembolsoRow?.ConsultaId ?? null,
-            disputaId,
-            origem: 'Disputa',
-            motivo: `Disputa procedente ao paciente #${disputaId}`
-          },
-          usuario
-        );
-      }
+      await garantirReembolsoDisputaEnfileirado(disputaId, usuario);
 
       const consultaInfo = await queryWithContext(
         usuario,

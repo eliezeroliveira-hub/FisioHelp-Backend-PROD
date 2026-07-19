@@ -370,6 +370,12 @@ async function buscarPacotePorId(pacoteId, usuario) {
       p.GatewayPaymentId,
       p.GatewayInstallmentId,
       p.GatewayStatus,
+      p.GatewayRefundStatus,
+      p.GatewayRefundValor,
+      p.GatewayRefundDescricao,
+      p.GatewayRefundSolicitadoEm,
+      p.GatewayRefundConfirmadoEm,
+      p.GatewayUltimoEvento,
       p.ValorPago,
       p.CriadoEm,
       p.PagoEm,
@@ -424,6 +430,70 @@ function normalizeOpcaoReembolso(v) {
   if (up === 'CREDITO' || up === 'CRÉDITO' || up === 'CREDITO_CARTEIRA' || up === 'CREDITO CARTEIRA') return 'Credito';
   if (up === 'REEMBOLSO' || up === 'ESTORNO') return 'Reembolso';
   return null;
+}
+
+async function garantirReembolsoPacoteEnfileirado(pacote, usuario) {
+  const pacoteId = Number(pacote?.Id);
+  if (!Number.isInteger(pacoteId) || pacoteId <= 0) {
+    throw new HttpError(400, 'Pacote inválido para enfileirar reembolso.');
+  }
+
+  const statusPacote = String(pacote?.Status || '').trim();
+  const gatewayStatus = String(pacote?.GatewayStatus || '').trim().toUpperCase();
+  const gatewayRefundStatus = String(pacote?.GatewayRefundStatus || '').trim().toUpperCase();
+  const solicitacaoRegistrada =
+    statusPacote.toUpperCase() === 'CANCELADO' &&
+    (
+      ['REEMBOLSOPENDENTE', 'REEMBOLSOFALHOU'].includes(gatewayStatus) ||
+      gatewayRefundStatus.length > 0
+    );
+
+  if (!solicitacaoRegistrada) {
+    throw new HttpError(409, 'Não existe solicitação de reembolso registrada para este pacote.');
+  }
+
+  if (['DONE', 'PARTIAL'].includes(gatewayRefundStatus)) {
+    return {
+      confirmado: true,
+      enfileirado: false,
+      fila: null,
+      pacoteId,
+    };
+  }
+
+  if (['DENIED', 'REFUSED', 'CANCELLED', 'CANCELED'].includes(gatewayRefundStatus)) {
+    throw new HttpError(
+      409,
+      `O reembolso do pacote está com status ${gatewayRefundStatus} e requer análise administrativa.`
+    );
+  }
+
+  const valor = round2(pacote?.GatewayRefundValor);
+  if (valor <= 0) {
+    throw new HttpError(
+      409,
+      'O valor calculado do reembolso não foi preservado. Encaminhe o pacote para análise administrativa.'
+    );
+  }
+
+  const fila = await reembolsosGatewayFilaService.enfileirarReembolso({
+    pacoteId,
+    origem: 'Pacote',
+    provider: 'asaas',
+    gatewayPaymentId: pacote?.GatewayPaymentId ?? null,
+    gatewayInstallmentId: pacote?.GatewayInstallmentId ?? null,
+    valor,
+    motivo:
+      pacote?.GatewayRefundDescricao ||
+      `Cancelamento do pacote #${pacoteId}`,
+  }, usuario);
+
+  return {
+    confirmado: false,
+    enfileirado: true,
+    fila,
+    pacoteId,
+  };
 }
 
 async function buscarSumarioContratoCancelamento(usuario) {
@@ -1006,6 +1076,21 @@ const pacotesService = {
 
     const statusAtual = normalizeText(pacote?.Status ?? '', 50);
     if (statusAtual && statusAtual.toUpperCase() === 'CANCELADO') {
+      if (opcaoReembolso === 'Reembolso') {
+        const recuperacao = await garantirReembolsoPacoteEnfileirado(pacote, usuario);
+        const atualizado = await buscarPacotePorId(id, usuario);
+
+        return {
+          pacote: atualizado,
+          sumarioContrato: null,
+          cancelamento: null,
+          opcaoReembolso,
+          reembolsoGateway: recuperacao.fila,
+          reembolsoConfirmado: recuperacao.confirmado,
+          idempotente: true,
+        };
+      }
+
       throw new HttpError(409, 'Este pacote já está cancelado.');
     }
 
@@ -1048,6 +1133,9 @@ const pacotesService = {
       req.input('MotivoCancelamento', sql.NVarChar(600), motivoCancelamento);
       req.input('GatewayStatusCancelamento', sql.NVarChar(120), gatewayStatusCancelamento);
       req.input('ValorCreditoCarteira', sql.Decimal(10, 2), valorDevolver);
+      req.input('SolicitarReembolso', sql.Bit, opcaoReembolso === 'Reembolso' ? 1 : 0);
+      req.input('GatewayRefundValor', sql.Decimal(10, 2), valorDevolver);
+      req.input('GatewayRefundDescricao', sql.NVarChar(500), motivoCancelamento);
 
       // texto para o crédito em carteira (se aplicável)
       const motivoCredito = opcaoReembolso === 'Credito'
@@ -1090,7 +1178,37 @@ const pacotesService = {
         SET
           Status = N'Cancelado',
           CanceladoEm = @AgoraBrasil,
-          GatewayStatus = @GatewayStatusCancelamento
+          GatewayStatus = @GatewayStatusCancelamento,
+          GatewayRefundStatus = CASE
+            WHEN @SolicitarReembolso = 0 THEN GatewayRefundStatus
+            WHEN LTRIM(RTRIM(ISNULL(GatewayRefundStatus, N''))) IN (N'DONE', N'PARTIAL')
+              THEN GatewayRefundStatus
+            ELSE N'LOCAL_REQUESTED'
+          END,
+          GatewayRefundValor = CASE
+            WHEN @SolicitarReembolso = 1 THEN @GatewayRefundValor
+            ELSE GatewayRefundValor
+          END,
+          GatewayRefundDescricao = CASE
+            WHEN @SolicitarReembolso = 1 THEN @GatewayRefundDescricao
+            ELSE GatewayRefundDescricao
+          END,
+          GatewayRefundSolicitadoEm = CASE
+            WHEN @SolicitarReembolso = 1 THEN COALESCE(GatewayRefundSolicitadoEm, @AgoraBrasil)
+            ELSE GatewayRefundSolicitadoEm
+          END,
+          GatewayUltimoEvento = CASE
+            WHEN @SolicitarReembolso = 1 THEN N'FISIOHELP_PACKAGE_REFUND_LOCAL_REQUESTED'
+            ELSE GatewayUltimoEvento
+          END,
+          GatewayAtualizadoEm = CASE
+            WHEN @SolicitarReembolso = 1 THEN @AgoraBrasil
+            ELSE GatewayAtualizadoEm
+          END,
+          GatewayErroMensagem = CASE
+            WHEN @SolicitarReembolso = 1 THEN NULL
+            ELSE GatewayErroMensagem
+          END
         WHERE Id = @PacoteId;
 
       COMMIT;
@@ -1108,15 +1226,12 @@ const pacotesService = {
 
     if (opcaoReembolso === 'Reembolso') {
       try {
-        reembolsoGateway = await reembolsosGatewayFilaService.enfileirarReembolso({
-          pacoteId: id,
-          origem: 'Pacote',
-          provider: 'asaas',
-          gatewayPaymentId: pacote?.GatewayPaymentId ?? null,
-          gatewayInstallmentId: pacote?.GatewayInstallmentId ?? null,
-          valor: valorDevolver,
-          motivo: motivoUsuario ?? `Cancelamento do pacote #${id}`,
-        }, usuario);
+        const pacotePendente = await buscarPacotePorId(id, usuario);
+        const recuperacao = await garantirReembolsoPacoteEnfileirado(
+          pacotePendente,
+          usuario
+        );
+        reembolsoGateway = recuperacao.fila;
 
         await queryWithContext(
           usuario,
