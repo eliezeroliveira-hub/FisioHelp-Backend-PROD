@@ -382,10 +382,23 @@ async function listarChamadosComAnexos({ usuario, chamadoId = null, status = nul
       fc.Descricao,
       fc.PrazoLimiteResposta,
       fc.DataConclusao,
-      fc.UltimaAtualizacao
+      fc.UltimaAtualizacao,
+      fc.ObservacoesInternas,
+      disputa.DisputaId,
+      disputa.StatusDisputa
     FROM dbo.FaleConoscoChamados fc WITH (NOLOCK)
     LEFT JOIN dbo.FaleConoscoCategorias cat WITH (NOLOCK)
       ON cat.Id = fc.CategoriaId
+    OUTER APPLY (
+      SELECT TOP (1)
+        d.Id AS DisputaId,
+        LTRIM(RTRIM(d.Status)) AS StatusDisputa
+      FROM dbo.DisputasConsultas d WITH (NOLOCK)
+      WHERE d.ConsultaId = fc.ConsultaId
+        AND fc.ObservacoesInternas LIKE N'%Origem=SP_AbrirDisputa_FaleConosco%'
+        AND fc.ObservacoesInternas LIKE N'%DisputaId=' + CONVERT(NVARCHAR(20), d.Id) + N'%'
+      ORDER BY d.Id DESC
+    ) disputa
     WHERE fc.Id IN (SELECT Id FROM @Filtro)
     ORDER BY fc.Id DESC;
 
@@ -438,19 +451,21 @@ const suporteService = {
    * @param {object} params
    * @param {object} params.usuario - { id, tipo }
    * @param {number} params.consultaId
-   * @param {number|null} params.categoriaId
    * @param {string} params.descricao
    * @param {string|null} params.opcaoReembolso - 'Credito' | 'Reembolso' | null
    * @param {string|null} params.motivoDisputa
    * @param {Array} params.files - req.files (multer)
    */
-  async abrirDisputaFaleConosco({ usuario, consultaId, categoriaId = null, descricao, opcaoReembolso = null, motivoDisputa = null, files = [] }) {
+  async abrirDisputaFaleConosco({ usuario, consultaId, descricao, opcaoReembolso = null, motivoDisputa = null, files = [] }) {
     requireUser(usuario);
 
     const _consultaId = Number(consultaId);
     if (!Number.isInteger(_consultaId) || _consultaId <= 0) throw new HttpError(400, 'ConsultaId inválido.');
 
-    const _categoriaId = await resolveCategoriaId({ usuario, categoriaId });
+    const _categoriaId = await resolveCategoriaId({
+      usuario,
+      categoriaNome: 'Contestações',
+    });
 
     const _descricao = normalizeText(descricao, 4000);
     if (!_descricao) throw new HttpError(400, 'Descricao é obrigatório.');
@@ -684,14 +699,33 @@ const suporteService = {
       },
       `
         SELECT TOP 1
-          LTRIM(RTRIM(Status)) AS StatusAtual
-        FROM dbo.FaleConoscoChamados
-        WHERE Id = @ChamadoId;
+          LTRIM(RTRIM(fc.Status)) AS StatusAtual,
+          disputa.DisputaId,
+          disputa.StatusDisputa
+        FROM dbo.FaleConoscoChamados fc
+        OUTER APPLY (
+          SELECT TOP (1)
+            d.Id AS DisputaId,
+            LTRIM(RTRIM(d.Status)) AS StatusDisputa
+          FROM dbo.DisputasConsultas d
+          WHERE d.ConsultaId = fc.ConsultaId
+            AND fc.ObservacoesInternas LIKE N'%Origem=SP_AbrirDisputa_FaleConosco%'
+            AND fc.ObservacoesInternas LIKE N'%DisputaId=' + CONVERT(NVARCHAR(20), d.Id) + N'%'
+          ORDER BY d.Id DESC
+        ) disputa
+        WHERE fc.Id = @ChamadoId;
       `
     );
 
-    const statusAtual = atual?.recordset?.[0]?.StatusAtual;
+    const chamadoAtual = atual?.recordset?.[0] ?? null;
+    const statusAtual = chamadoAtual?.StatusAtual;
     if (!statusAtual) throw new HttpError(404, 'Chamado não encontrado.');
+    if (chamadoAtual?.DisputaId) {
+      throw new HttpError(
+        409,
+        `Chamado vinculado à disputa ${chamadoAtual.DisputaId}. Altere o status pela tela de Disputas.`
+      );
+    }
     if (!canTransitionChamadoStatus(statusAtual, statusFinal)) {
       throw new HttpError(409, `Transição de status inválida: ${statusAtual} -> ${statusFinal}.`);
     }

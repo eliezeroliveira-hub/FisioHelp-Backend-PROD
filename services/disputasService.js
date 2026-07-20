@@ -270,9 +270,24 @@ const disputasService = {
         vw.*,
         d.OpcaoReembolso AS OpcaoReembolsoDisputa,
         d.EmAnaliseEm AS EmAnaliseEm
+        ${isAdmin ? `,
+        chamado.ChamadoId,
+        chamado.ProtocoloTexto,
+        chamado.StatusChamado` : ''}
         ${paginado ? ', COUNT(*) OVER() AS Total' : ''}
       FROM dbo.vw_DisputasConsultas vw
       LEFT JOIN dbo.DisputasConsultas d ON d.Id = vw.DisputaId
+      ${isAdmin ? `OUTER APPLY (
+        SELECT TOP (1)
+          fc.Id AS ChamadoId,
+          fc.ProtocoloTexto,
+          LTRIM(RTRIM(fc.Status)) AS StatusChamado
+        FROM dbo.FaleConoscoChamados fc WITH (NOLOCK)
+        WHERE fc.ConsultaId = vw.ConsultaId
+          AND fc.ObservacoesInternas LIKE N'%Origem=SP_AbrirDisputa_FaleConosco%'
+          AND fc.ObservacoesInternas LIKE N'%DisputaId=' + CONVERT(NVARCHAR(20), vw.DisputaId) + N'%'
+        ORDER BY fc.Id DESC
+      ) chamado` : ''}
       WHERE 1 = 1
     `;
 
@@ -595,34 +610,55 @@ const r = await queryWithContext(
         req.input('Obs', sql.NVarChar(2000), observacoes || null);
       },
       `
-        DECLARE @Saida TABLE (
-          Id INT,
-          Status NVARCHAR(30),
-          EmAnaliseEm DATETIME
-        );
+        SET XACT_ABORT ON;
+        BEGIN TRY
+          BEGIN TRAN;
 
-        UPDATE dbo.DisputasConsultas
-        SET
-          Status      = N'EmAnalise',
-          EmAnaliseEm = COALESCE(EmAnaliseEm, SYSDATETIME()),
-          Observacoes = @Obs
-        OUTPUT inserted.Id, inserted.Status, inserted.EmAnaliseEm
-          INTO @Saida (Id, Status, EmAnaliseEm)
-        WHERE Id = @Id;
+          DECLARE @Saida TABLE (
+            Id INT,
+            Status NVARCHAR(30),
+            EmAnaliseEm DATETIME
+          );
 
-        SELECT TOP (1)
-          Id,
-          Status,
-          EmAnaliseEm
-        FROM @Saida;
+          UPDATE dbo.DisputasConsultas
+          SET
+            Status      = N'EmAnalise',
+            EmAnaliseEm = COALESCE(EmAnaliseEm, SYSDATETIME()),
+            Observacoes = @Obs
+          OUTPUT inserted.Id, inserted.Status, inserted.EmAnaliseEm
+            INTO @Saida (Id, Status, EmAnaliseEm)
+          WHERE Id = @Id;
+
+          UPDATE fc
+          SET
+            Status = N'EmAnalise',
+            DataConclusao = NULL,
+            UltimaAtualizacao = SYSDATETIME()
+          FROM dbo.FaleConoscoChamados fc
+          INNER JOIN dbo.DisputasConsultas d ON d.ConsultaId = fc.ConsultaId
+          WHERE d.Id = @Id
+            AND fc.ObservacoesInternas LIKE N'%Origem=SP_AbrirDisputa_FaleConosco%'
+            AND fc.ObservacoesInternas LIKE N'%DisputaId=' + CONVERT(NVARCHAR(20), @Id) + N'%';
+
+          COMMIT;
+
+          SELECT TOP (1)
+            Id,
+            Status,
+            EmAnaliseEm
+          FROM @Saida;
+        END TRY
+        BEGIN CATCH
+          IF @@TRANCOUNT > 0 ROLLBACK;
+          THROW;
+        END CATCH;
       `
     );
 
-    if (result.rowsAffected[0] === 0) {
+    const row = result.recordset?.[0] ?? null;
+    if (!row) {
       throw new HttpError(404, 'Disputa não encontrada ou não atualizada.');
     }
-
-    const row = result.recordset?.[0] ?? null;
 
     void notificacoesDispatch.disputaAtualizada({
       disputaId: row?.Id ?? disputaId,
