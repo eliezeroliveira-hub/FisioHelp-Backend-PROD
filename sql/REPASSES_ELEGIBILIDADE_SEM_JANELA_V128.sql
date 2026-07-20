@@ -201,6 +201,24 @@ BEGIN
 END;
 ');
 
+  IF EXISTS (
+      SELECT 1
+      FROM sys.parameters
+      WHERE object_id = OBJECT_ID(N'dbo.SP_ProcessarRepassesSemanais', N'P')
+        AND name IN (N'@DataInicio', N'@DataFim')
+  )
+      THROW 51280, 'Parametros legados de janela ainda presentes na SP.', 1;
+
+  DECLARE @Definition NVARCHAR(MAX) = OBJECT_DEFINITION(OBJECT_ID(N'dbo.SP_ProcessarRepassesSemanais', N'P'));
+
+  IF @Definition LIKE N'%t.DataCriacao >= @DataInicio%'
+     OR @Definition LIKE N'%t.DataCriacao < DATEADD(DAY, 1, @DataFim)%'
+      THROW 51281, 'Filtros legados por Transacoes.DataCriacao ainda presentes na SP.', 1;
+
+  IF @Definition NOT LIKE N'%N''Concluída''%'
+     OR @Definition NOT LIKE N'%N''Paciente Ausente''%'
+     OR @Definition NOT LIKE N'%WITH (UPDLOCK, HOLDLOCK)%'
+      THROW 51282, 'Invariantes dos fluxos de repasse nao foram preservadas.', 1;
 
   COMMIT;
 END TRY
@@ -212,5 +230,5 @@ GO
 
 SELECT
   CAST(1 AS BIT) AS Sucesso,
-  N'AZURE_TIMEZONE_REPASSES_JOB_V118 aplicado. SP_ProcessarRepassesSemanais passa a aceitar @AgoraBrasil/fallback Sao Paulo.' AS Mensagem;
+  N'REPASSES_ELEGIBILIDADE_SEM_JANELA_V128 aplicado. Repasses elegiveis deixam de depender de Transacoes.DataCriacao.' AS Mensagem;
 GO
