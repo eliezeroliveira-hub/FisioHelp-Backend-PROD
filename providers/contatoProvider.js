@@ -5,6 +5,7 @@ import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { ENV } from '../config/env.js';
 import { log } from '../config/logger.js';
 import whatsappProvider, { isWhatsAppProviderReal } from './whatsappProvider.js';
+import twilioVerifyProvider, { isTwilioVerifyConfigured } from './twilioVerifyProvider.js';
 
 const MODE = String(ENV.CONTATO_PROVIDER_MODE || 'stub').trim().toLowerCase();
 
@@ -256,6 +257,25 @@ async function enviarCodigo({ canal, destino, codigo, assunto, html, texto }) {
       throw new Error('Destino de telefone não informado.');
     }
 
+    if (isTwilioVerifyConfigured) {
+      const resultado = await twilioVerifyProvider.enviarCodigoSms({
+        destinatario: destino,
+        codigo,
+      });
+
+      log('info', 'Código de verificação enviado por Twilio Verify SMS', {
+        canal: canalNorm,
+        destinoMascarado,
+        verificationSid: resultado.verificationSid || null,
+        status: resultado.status || null,
+      });
+
+      return {
+        ok: true,
+        modo: 'twilio-verify-sms',
+        messageId: resultado.verificationSid || null,
+      };
+    }
     const mensagem = String(texto || textoWhatsAppFallback(codigo)).trim();
     const resultado = await whatsappProvider.enviarWhatsApp({
       destinatario: destino,
