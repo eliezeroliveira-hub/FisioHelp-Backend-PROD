@@ -736,12 +736,30 @@ export const pacientesService = {
             inputs.push({ key: 'CPFValido', type: sql.Bit, value: parsed.cpfValido ? 1 : 0 });
           }
 
-          // Se atualizar Email/Telefone, invalida verificação para exigir nova confirmação
           if (key === 'Email') {
-            setParts.push(`EmailVerificado = 0`, `EmailVerificadoEm = NULL`);
+            const emailAlterado = `
+              LOWER(LTRIM(RTRIM(ISNULL(Email, N'')))) <>
+              LOWER(LTRIM(RTRIM(ISNULL(@Email, N''))))
+            `;
+            setParts.push(
+              `EmailVerificado = CASE WHEN ${emailAlterado} THEN 0 ELSE EmailVerificado END`,
+              `EmailVerificadoEm = CASE WHEN ${emailAlterado} THEN NULL ELSE EmailVerificadoEm END`
+            );
           }
           if (key === 'Telefone') {
-            setParts.push(`TelefoneVerificado = 0`, `TelefoneVerificadoEm = NULL`);
+            const telefoneAlterado = `
+              ISNULL(Telefone, N'') <> ISNULL(@Telefone, N'')
+            `;
+            setParts.push(
+              `TelefoneVerificado = CASE
+                WHEN ${telefoneAlterado} THEN 0
+                ELSE TelefoneVerificado
+              END`,
+              `TelefoneVerificadoEm = CASE
+                WHEN ${telefoneAlterado} THEN NULL
+                ELSE TelefoneVerificadoEm
+              END`
+            );
           }
         }
       }
