@@ -3105,6 +3105,7 @@ const fisioterapeutasService = {
       usuarioTipo: 'Fisioterapeuta',
       usuarioId: fisioterapeutaId,
       canal: canalNorm,
+      forcarReenvio: dados?.forcarReenvio ?? dados?.ForcarReenvio ?? true,
       destinoInformado: dados?.destino ?? dados?.Destino ?? null,
       expiraEmMinutos: 10,
       usuario: safeUsuario(usuario),

@@ -112,6 +112,7 @@ export async function solicitarVerificacaoContatoInterna({
   usuarioTipo,
   usuarioId,
   canal = 'Email',
+  forcarReenvio = true,
   destinoInformado = null,
   assunto = null,
   html = null,
@@ -183,6 +184,7 @@ export async function solicitarVerificacaoContatoInterna({
       req.input('ExpiraEm', sql.DateTime2(7), expiraEm);
       req.input('MaxTentativas', sql.SmallInt, MAX_TENTATIVAS);
       req.input('CooldownSegundos', sql.Int, VERIFICACAO_CONTATO_COOLDOWN_SEGUNDOS);
+      req.input('ForcarReenvio', sql.Bit, forcarReenvio !== false ? 1 : 0);
     },
     `
       SET NOCOUNT ON;
@@ -203,19 +205,34 @@ export async function solicitarVerificacaoContatoInterna({
         AND Canal = @Canal;
 
       IF (
-        @UltimoEnvioEm IS NOT NULL
-        AND DATEDIFF(SECOND, @UltimoEnvioEm, SYSDATETIME()) < @CooldownSegundos
-        AND @StatusAtual = N'Pendente'
+        @StatusAtual = N'Pendente'
         AND @ExpiraEmAtual > SYSDATETIME()
       )
       BEGIN
-        SELECT
-          CAST(0 AS BIT) AS PodeEnviar,
-          CAST(1 AS BIT) AS CodigoJaEnviado,
-          DATEADD(SECOND, @CooldownSegundos, @UltimoEnvioEm) AS PodeReenviarEm,
-          @ExpiraEmAtual AS ExpiraEm;
-        COMMIT;
-        RETURN;
+        IF @ForcarReenvio = 0
+        BEGIN
+          SELECT
+            CAST(0 AS BIT) AS PodeEnviar,
+            CAST(1 AS BIT) AS CodigoJaEnviado,
+            DATEADD(SECOND, @CooldownSegundos, @UltimoEnvioEm) AS PodeReenviarEm,
+            @ExpiraEmAtual AS ExpiraEm;
+          COMMIT;
+          RETURN;
+        END
+
+        IF (
+          @UltimoEnvioEm IS NOT NULL
+          AND DATEDIFF(SECOND, @UltimoEnvioEm, SYSDATETIME()) < @CooldownSegundos
+        )
+        BEGIN
+          SELECT
+            CAST(0 AS BIT) AS PodeEnviar,
+            CAST(0 AS BIT) AS CodigoJaEnviado,
+            DATEADD(SECOND, @CooldownSegundos, @UltimoEnvioEm) AS PodeReenviarEm,
+            @ExpiraEmAtual AS ExpiraEm;
+          COMMIT;
+          RETURN;
+        END
       END
 
       MERGE dbo.VerificacoesContato AS t

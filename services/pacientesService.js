@@ -1111,6 +1111,7 @@ export const pacientesService = {
       usuarioTipo: 'Paciente',
       usuarioId: pacienteId,
       canal,
+      forcarReenvio: payload?.forcarReenvio ?? payload?.ForcarReenvio ?? true,
       destinoInformado: payload?.destino ?? payload?.Destino ?? null,
       expiraEmMinutos: 10,
       usuario,
