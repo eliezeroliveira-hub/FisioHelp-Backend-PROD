@@ -151,9 +151,11 @@ const pacientesController = {
       const body = req.body || {};
       const Canal = body.Canal ?? body.canal;
       const Destino = body.Destino ?? body.destino;
+      const ForcarReenvio = body.ForcarReenvio ?? body.forcarReenvio;
       const result = await pacientesService.solicitarVerificacaoContato(req.usuario, pacienteId, {
         Canal,
         Destino,
+        ForcarReenvio,
       });
 
       return res.json({ sucesso: true, ...result });

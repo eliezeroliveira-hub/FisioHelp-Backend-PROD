@@ -1118,12 +1118,15 @@ const fisioterapeutasController = {
         return res.status(403).json({ sucesso: false, erro: 'Acesso negado.' });
       }
 
-      const { Canal, canal, canal_contato, canalContato } = req.body || {};
+      const body = req.body || {};
+      const { Canal, canal, canal_contato, canalContato } = body;
       const canalUsar = Canal ?? canal ?? canal_contato ?? canalContato;
+      const forcarReenvio = body.ForcarReenvio ?? body.forcarReenvio;
 
       const resultado = await fisioterapeutasService.solicitarVerificacaoContato({
         fisioterapeutaId: id,
         canal: canalUsar,
+        forcarReenvio,
         usuario: {
           tipoUsuario: req.usuario?.tipo,
           usuarioId: req.usuario?.id,
