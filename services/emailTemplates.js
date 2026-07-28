@@ -6,6 +6,7 @@ const TERMOS_URL = 'https://fisiohelp.com.br/termos-de-uso';
 const PRIVACIDADE_URL = 'https://fisiohelp.com.br/politica-de-privacidade';
 const INSTAGRAM_URL = 'https://www.instagram.com/fisiohelp.br?utm_source=qr';
 const LINKEDIN_URL = 'https://www.linkedin.com/company/fisiohelpbr/';
+const GOOGLE_REVIEW_URL = 'https://g.page/r/CeSycetra_VMEBI/review';
 
 export function escapeHtml(value) {
   return String(value ?? '')
@@ -465,15 +466,27 @@ export function montarEmailNotificacao({ titulo, mensagem, dados = null } = {}) 
   const assunto = normalizarAssunto(titulo);
   const mensagemTexto = normalizarMensagem(mensagem);
   const assuntoHtml = escapeHtml(assunto);
+  const incluirAvaliacaoGoogle = dados?.tipo === 'avaliacao_pendente';
+  const avaliacaoGoogleHtml = incluirAvaliacaoGoogle
+    ? `
+      <p style="margin:16px 0 0 0;color:#3D2B22;font-size:16px;line-height:1.6;">
+        Conte também como foi sua experiência com a FisioHelp. Sua opinião ajuda outras pessoas a conhecerem a plataforma e contribui para melhorarmos continuamente.
+        <a href="${escapeHtml(GOOGLE_REVIEW_URL)}" target="_blank" rel="noopener noreferrer" style="color:#F46337;text-decoration:underline;font-weight:700;">Avalie a FisioHelp no Google.</a>
+      </p>`
+    : '';
+  const avaliacaoGoogleTexto = incluirAvaliacaoGoogle
+    ? `\n\nConte também como foi sua experiência com a FisioHelp. Sua opinião ajuda outras pessoas a conhecerem a plataforma e contribui para melhorarmos continuamente.\n\nAvalie a FisioHelp no Google: ${GOOGLE_REVIEW_URL}`
+    : '';
 
   return montarShell({
     assunto,
     conteudoHtml: `
       <h1 style="margin:0 0 16px 0;color:#3D2B22;font-size:22px;line-height:1.3;font-weight:700;">${assuntoHtml}</h1>
-      <div style="color:#3D2B22;font-size:16px;line-height:1.6;white-space:pre-line;">${textoMensagemHtml(mensagemTexto || 'Você recebeu uma nova mensagem da FisioHelp.')}</div>`,
+      <div style="color:#3D2B22;font-size:16px;line-height:1.6;white-space:pre-line;">${textoMensagemHtml(mensagemTexto || 'Você recebeu uma nova mensagem da FisioHelp.')}</div>
+      ${avaliacaoGoogleHtml}`,
     conteudoTexto: `${assunto}
 
-${mensagemTexto || 'Você recebeu uma nova mensagem da FisioHelp.'}`,
+${mensagemTexto || 'Você recebeu uma nova mensagem da FisioHelp.'}${avaliacaoGoogleTexto}`,
   });
 }
 
