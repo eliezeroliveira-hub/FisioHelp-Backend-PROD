@@ -6,6 +6,7 @@ import notificacoesDispatch from './notificacoesDispatch.js';
 import { HttpError } from '../utils/httpError.js';
 import { normalizeCNPJ } from '../utils/identityValidators.js';
 import fileStorageProvider from '../providers/fileStorageProvider.js';
+import { agoraAppDate } from '../utils/appDateTime.js';
 
 const YOUTUBE_RE = /^https?:\/\/(www\.)?(youtube\.com\/(watch\?v=|embed\/|shorts\/)|youtu\.be\/).+/i;
 const STATUS_DOCUMENTO_VALIDOS = new Set(['Aprovado', 'Reprovado', 'Pendente']);
@@ -1175,19 +1176,21 @@ const adminService = {
   //  MÉTODOS INTERNOS – VALIDAÇÃO DOCUMENTAL
   // -------------------------------------------------------------
   async _validarDocumentoGenerico(usuario, documento, status, motivo, adminId) {
+    const agoraBrasil = agoraAppDate();
     const r = await queryWithContext(
       usuario,
       (request) => request
         .input('Id', sql.Int, documento.Id)
         .input('Status', sql.NVarChar(20), status)
         .input('Motivo', sql.NVarChar(500), motivo || null)
-        .input('ValidadorId', sql.Int, adminId),
+        .input('ValidadorId', sql.Int, adminId)
+        .input('AgoraBrasil', sql.DateTime2(7), agoraBrasil),
       `
         UPDATE dbo.DocumentosFisioterapeutas
         SET Status        = @Status,
             MotivoRejeicao = @Motivo,
             ValidadorId   = @ValidadorId,
-            DataValidacao = SYSDATETIME()
+            DataValidacao = @AgoraBrasil
         WHERE Id = @Id;
         SELECT @@ROWCOUNT AS Afetadas;
       `
@@ -1198,6 +1201,7 @@ const adminService = {
   },
 
   async _validarDocumentoCrefito(usuario, documento, status, motivo, adminId) {
+    const agoraBrasil = agoraAppDate();
     const fisioId = documento.FisioterapeutaId;
 
     if (status === 'Reprovado' && !motivo)
@@ -1210,7 +1214,8 @@ const adminService = {
           .input('Id', sql.Int, documento.Id)
           .input('Status', sql.NVarChar(20), 'Aprovado')
           .input('ValidadorId', sql.Int, adminId)
-          .input('FisioId', sql.Int, fisioId),
+          .input('FisioId', sql.Int, fisioId)
+          .input('AgoraBrasil', sql.DateTime2(7), agoraBrasil),
         `
           BEGIN TRY
             BEGIN TRAN;
@@ -1219,7 +1224,7 @@ const adminService = {
             SET Status         = @Status,
                 MotivoRejeicao = NULL,
                 ValidadorId    = @ValidadorId,
-                DataValidacao  = SYSDATETIME(),
+                DataValidacao  = @AgoraBrasil,
                 FonteValidacao = 'Validação Manual',
                 ScoreConfianca = 100
             WHERE Id = @Id;
@@ -1229,7 +1234,7 @@ const adminService = {
 
             UPDATE dbo.Fisioterapeutas
             SET CrefitoVerificado = 1,
-                DataVerificacao   = SYSDATETIME(),
+                DataVerificacao   = @AgoraBrasil,
                 FonteVerificacao  = 'Validação Manual'
             WHERE Id = @FisioId;
 
@@ -1285,7 +1290,8 @@ const adminService = {
           .input('Status', sql.NVarChar(20), 'Reprovado')
           .input('Motivo', sql.NVarChar(500), motivo)
           .input('ValidadorId', sql.Int, adminId)
-          .input('FisioId', sql.Int, fisioId),
+          .input('FisioId', sql.Int, fisioId)
+          .input('AgoraBrasil', sql.DateTime2(7), agoraBrasil),
         `
           BEGIN TRY
             BEGIN TRAN;
@@ -1294,7 +1300,7 @@ const adminService = {
             SET Status         = @Status,
                 MotivoRejeicao = @Motivo,
                 ValidadorId    = @ValidadorId,
-                DataValidacao  = SYSDATETIME()
+                DataValidacao  = @AgoraBrasil
             WHERE Id = @Id;
 
             IF @@ROWCOUNT = 0
@@ -1327,13 +1333,14 @@ const adminService = {
         .input('Id', sql.Int, documento.Id)
         .input('Status', sql.NVarChar(20), status)
         .input('Motivo', sql.NVarChar(500), motivo || null)
-        .input('ValidadorId', sql.Int, adminId),
+        .input('ValidadorId', sql.Int, adminId)
+        .input('AgoraBrasil', sql.DateTime2(7), agoraBrasil),
       `
         UPDATE dbo.DocumentosFisioterapeutas
         SET Status         = @Status,
             MotivoRejeicao = @Motivo,
             ValidadorId    = @ValidadorId,
-            DataValidacao = SYSDATETIME()
+            DataValidacao = @AgoraBrasil
         WHERE Id = @Id;
         SELECT @@ROWCOUNT AS Afetadas;
       `

@@ -27,6 +27,7 @@ import {
 import { validatePasswordStrength } from '../utils/passwordPolicy.js';
 import fileStorageProvider from '../providers/fileStorageProvider.js';
 import { getHeicPreviewRelativePath, isHeicStoragePath } from '../utils/heicPreview.js';
+import { agoraAppDate } from '../utils/appDateTime.js';
 
 const APP_TIME_ZONE = 'America/Sao_Paulo';
 const CNPJ_ALFANUMERICO_REPASSE_MSG =
@@ -1647,6 +1648,7 @@ const fisioterapeutasService = {
         req.input('OAuthJti', sql.NVarChar(36), oauthCadastro?.jti || null);
         req.input('OAuthProvedor', sql.NVarChar(30), oauthCadastro?.provider || null);
         req.input('OAuthSubject', sql.NVarChar(255), oauthCadastro?.subject || null);
+        req.input('AgoraBrasil', sql.DateTime2(7), agoraAppDate());
       },
       `
         SET XACT_ABORT ON;
@@ -1762,7 +1764,7 @@ const fisioterapeutasService = {
           INSERT INTO dbo.DocumentosFisioterapeutas
             (FisioterapeutaId, TipoDocumento, CaminhoArquivo, Status, DataEnvio, FonteValidacao, ScoreConfianca)
           VALUES
-            (@FisioId, N'CREFITO', @CREFITO, N'Pendente', SYSDATETIME(), N'Cadastro', NULL);
+            (@FisioId, N'CREFITO', @CREFITO, N'Pendente', @AgoraBrasil, N'Cadastro', NULL);
 
           IF (NULLIF(LTRIM(RTRIM(@CodigoIndicacao)), '') IS NOT NULL)
           BEGIN
