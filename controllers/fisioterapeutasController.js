@@ -7,6 +7,7 @@ import path from 'path';
 import sharp from 'sharp';
 import fileStorageProvider from '../providers/fileStorageProvider.js';
 import { createHeicPreviewFromFile, getHeicPreviewRelativePath, isHeicStoragePath } from '../utils/heicPreview.js';
+import { formatAppDateTimeLocalIso } from '../utils/appDateTime.js';
 
 // Helpers
 const asTipo = (u) => String(u?.tipo || '').toLowerCase();
@@ -158,6 +159,7 @@ function montarPerfilPublico(f) {
 
   return {
     ...f,
+    DataCadastro: f.DataCadastro ? formatAppDateTimeLocalIso(f.DataCadastro) : null,
     FotoPerfilUrl: normalizarFotoPerfilUrl(f.FotoPerfilUrl ?? null),
     CREFITO: formatarCrefito(f.CREFITO, f.Estado),
     CrefitoVerificado: toBool(f.CrefitoVerificado),
