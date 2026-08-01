@@ -6,6 +6,7 @@ import { asaasClient } from './asaasClient.js';
 import notificacoesDispatch from './notificacoesDispatch.js';
 import { isCNPJAlfanumerico, isValidCNPJ, normalizeCNPJ } from '../utils/identityValidators.js';
 import { agoraBrasilDate } from '../utils/appDateTime.js';
+import { normalizarChavePixTelefoneAsaas } from '../utils/pixKey.js';
 
 const STATUS_LOTE_ATIVO = ['Processando', 'EnviadoGateway', 'AguardandoConfirmacao'];
 const STATUS_TRANSFER_DONE = new Set(['DONE']);
@@ -199,11 +200,19 @@ function buildAsaasTransferPayload(lote) {
     assertCnpjSuportadoPeloGateway(lote?.ChavePix ?? lote?.CNPJ);
   }
 
+  let chavePix = text(lote.ChavePix, 140);
+  if (tipoChavePix === 'PHONE') {
+    chavePix = normalizarChavePixTelefoneAsaas(lote.ChavePix);
+    if (!chavePix) {
+      throw new Error('Chave Pix telefone inválida para transferência. Use DDD + número de celular com 11 dígitos.');
+    }
+  }
+
   return {
     value: toMoney(lote.ValorTransferencia),
     operationType: 'PIX',
-    pixAddressKey: text(lote.ChavePix, 140),
-    pixAddressKeyType: text(lote.TipoChavePix, 20),
+    pixAddressKey: chavePix,
+    pixAddressKeyType: tipoChavePix,
     description: buildDescricaoLote(lote),
     externalReference: `REPASSE_${lote.Id}`,
   };

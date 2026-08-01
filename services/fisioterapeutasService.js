@@ -27,6 +27,7 @@ import {
 import { validatePasswordStrength } from '../utils/passwordPolicy.js';
 import fileStorageProvider from '../providers/fileStorageProvider.js';
 import { getHeicPreviewRelativePath, isHeicStoragePath } from '../utils/heicPreview.js';
+import { normalizarChavePixTelefoneAsaas } from '../utils/pixKey.js';
 import { agoraAppDate } from '../utils/appDateTime.js';
 
 const APP_TIME_ZONE = 'America/Sao_Paulo';
@@ -204,11 +205,8 @@ function normalizarChavePix(tipo, value) {
   }
 
   if (tipo === 'PHONE') {
-    const phone = normalizarTelefoneBR(raw);
-    const digits = phone.replace(/\D/g, '');
-    if (!digits.startsWith('55') || (digits.length !== 12 && digits.length !== 13)) {
-      throw new HttpError(400, 'Chave Pix telefone inválida. Use DDD + número.');
-    }
+    const phone = normalizarChavePixTelefoneAsaas(raw);
+    if (!phone) throw new HttpError(400, 'Chave Pix telefone inválida. Use DDD + número de celular com 11 dígitos.');
     return phone;
   }
 

@@ -11,7 +11,7 @@
     "check:env": "node -e \"require('dotenv').config(); console.log(process.env);\"",
     "uploads:blob:dry-run": "node scripts/migrarUploadsParaBlob.js --dry-run",
     "uploads:blob:migrate": "node scripts/migrarUploadsParaBlob.js",
-    "test": "echo \"No tests configured yet.\" && exit 0"
+    "test": "node --test"
   },
   "keywords": [
     "express",
