@@ -8,7 +8,7 @@ const backendRoot = path.resolve(packageRoot, '..');
 const distRoot = path.join(packageRoot, 'dist');
 
 const packageEntries = ['src', 'host.json', 'package.json', 'package-lock.json'];
-const backendEntries = ['workers', 'services', 'providers', 'config', 'utils'];
+const backendEntries = ['workers', 'services', 'providers', 'config', 'utils', 'templates'];
 const funcignore = `local.settings.json
 .git/
 .gitignore

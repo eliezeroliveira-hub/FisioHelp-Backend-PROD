@@ -1,4 +1,5 @@
 import { formatCNPJ } from '../utils/identityValidators.js';
+import { montarEmailLembretePerfilFisioterapeuta } from './perfilFisioterapeutaEmailTemplate.js';
 
 const FOOTER = 'Mensagem automática — esta caixa não é monitorada. Fale com suporte@fisiohelp.com.br.';
 const FALLBACK_SUBJECT = 'Mensagem da FisioHelp';
@@ -443,6 +444,12 @@ Você poderá acompanhar as atualizações pelo aplicativo.`;
 }
 
 export function montarEmailNotificacao({ titulo, mensagem, dados = null } = {}) {
+  if (dados?.emailModelo === 'lembrete_perfil_fisioterapeuta') {
+    return montarEmailLembretePerfilFisioterapeuta({
+      nomeFisioterapeuta: dados?.fisioterapeutaNome,
+    });
+  }
+
   if (dados?.emailModelo === 'consulta_cancelada_paciente') {
     return montarEmailConsultaCanceladaPaciente(dados);
   }

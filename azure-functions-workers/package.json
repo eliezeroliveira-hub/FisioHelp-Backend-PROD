@@ -6,7 +6,7 @@
   "main": "src/index.js",
   "scripts": {
     "prepare:package": "node scripts/prepare-package.mjs",
-    "check": "node --check src/index.js && node --check src/shared/runWorkerTick.js && node --check src/functions/processarFilaNotificacoes.js && node --check src/functions/processarFilaContatoTransacional.js && node --check src/functions/processarFilaReembolsosGateway.js && node --check src/functions/processarFilaRepassesGateway.js && node --check src/functions/enfileirarAvaliacoesPendentes.js && node --check src/functions/enfileirarLembretesConsulta.js"
+    "check": "node --check src/index.js && node --check src/shared/runWorkerTick.js && node --check src/functions/processarFilaNotificacoes.js && node --check src/functions/processarFilaContatoTransacional.js && node --check src/functions/processarFilaReembolsosGateway.js && node --check src/functions/processarFilaRepassesGateway.js && node --check src/functions/enfileirarAvaliacoesPendentes.js && node --check src/functions/enfileirarLembretesConsulta.js && node --check src/functions/enfileirarLembretePerfilFisioterapeuta.js"
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.1068.0",
