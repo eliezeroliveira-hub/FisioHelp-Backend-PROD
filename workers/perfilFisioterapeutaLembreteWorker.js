@@ -26,6 +26,17 @@ function intEnv(value, fallback, { min = 1, max = 60_000 } = {}) {
   return n;
 }
 
+function optionalIntEnv(value, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
+  if (value === undefined || value === null || String(value).trim() === '') return null;
+
+  const n = Number.parseInt(String(value), 10);
+  if (!Number.isInteger(n) || n < min || n > max) {
+    throw new Error(`Valor inteiro invalido para filtro de fisioterapeuta: ${value}`);
+  }
+
+  return n;
+}
+
 const config = {
   enabled: boolEnv(process.env.PERFIL_LEMBRETE_WORKER_ENABLED, false),
   delayHours: intEnv(process.env.PERFIL_LEMBRETE_DELAY_HOURS, 48, {
@@ -39,6 +50,10 @@ const config = {
   batchSize: intEnv(process.env.PERFIL_LEMBRETE_BATCH_SIZE, 20, {
     min: 1,
     max: 100,
+  }),
+  fisioterapeutaIdAlvo: optionalIntEnv(process.env.PERFIL_LEMBRETE_FISIOTERAPEUTA_ID, {
+    min: 1,
+    max: 2_147_483_647,
   }),
 };
 
@@ -57,6 +72,7 @@ async function buscarPendencias(usuario) {
       req.input('BatchSize', sql.Int, config.batchSize);
       req.input('DelayHours', sql.Int, config.delayHours);
       req.input('RecurrenceMonths', sql.Int, config.recurrenceMonths);
+      req.input('FisioterapeutaIdAlvo', sql.Int, config.fisioterapeutaIdAlvo);
     },
     `
       DECLARE @AgoraUtc DATETIME2(7) = SYSUTCDATETIME();
@@ -99,6 +115,7 @@ async function buscarPendencias(usuario) {
         ) ultimoEmail
         WHERE ISNULL(f.Ativo, 0) = 1
           AND ISNULL(f.IsBloqueado, 0) = 0
+          AND (@FisioterapeutaIdAlvo IS NULL OR f.Id = @FisioterapeutaIdAlvo)
           AND f.DataCadastro IS NOT NULL
           AND f.DataCadastro <= DATEADD(HOUR, -@DelayHours, @AgoraUtc)
       ),
@@ -256,6 +273,7 @@ export function startPerfilFisioterapeutaLembreteWorker() {
     delayHours: config.delayHours,
     recurrenceMonths: config.recurrenceMonths,
     batchSize: config.batchSize,
+    fisioterapeutaIdAlvo: config.fisioterapeutaIdAlvo,
   });
 
   return timer;

@@ -48,3 +48,7 @@ dentro do proprio `tick()` e permanece inativo por padrao. Configuracoes:
 - `PERFIL_LEMBRETE_DELAY_HOURS=48`
 - `PERFIL_LEMBRETE_RECURRENCE_MONTHS=3`
 - `PERFIL_LEMBRETE_BATCH_SIZE=20`
+- `PERFIL_LEMBRETE_FISIOTERAPEUTA_ID=` (opcional; restringe o processamento a um fisioterapeuta)
+
+Para um teste controlado em HML, defina `PERFIL_LEMBRETE_FISIOTERAPEUTA_ID` com o ID
+do fisioterapeuta. Remova a configuracao ao voltar ao processamento geral.
