@@ -7,6 +7,10 @@ import net from "net";
 import { ENV } from "../config/env.js";
 import { log } from "../config/logger.js";
 import { normalizeCNPJ, normalizeEmail } from "../utils/identityValidators.js";
+import {
+  mapAuthLoginResult,
+  normalizeAuthUserType as normalizeTipoUsuario,
+} from "../utils/authLoginResult.js";
 
 const REFRESH_DAYS = Number(ENV.REFRESH_TOKEN_DAYS || 30);
 const OAUTH_SIGNUP_TOKEN_TTL_MINUTES = parsePositiveInt(process.env.OAUTH_SIGNUP_TOKEN_TTL_MINUTES, 60);
@@ -171,15 +175,6 @@ function to01(x, def = 0) {
     // ignore
   }
   return def;
-}
-
-function normalizeTipoUsuario(tipo) {
-  const t = String(tipo ?? "").trim().toLowerCase();
-  if (!t) return null;
-  if (t === "admin" || t === "administrador" || t === "administradores") return "Admin";
-  if (t === "paciente") return "Paciente";
-  if (t === "fisioterapeuta" || t === "fisio") return "Fisioterapeuta";
-  return String(tipo).trim();
 }
 
 function normalizeOAuthProvider(value) {
@@ -496,7 +491,7 @@ function enforceAcessoLogin(usuario) {
  * Busca usuário para login:
  * - Por EMAIL: usa SP unificada dbo.sp_LoginPorEmail_Min
  *
- * - Por CPF (Paciente): usa a SP mínima dbo.sp_LoginPacientePorCpf_Min
+ * - Por CPF (Paciente ou Fisioterapeuta): usa dbo.sp_LoginPorCpf_Min
  *
  * - Por CNPJ (Fisioterapeuta): usa a SP mínima dbo.sp_LoginFisioterapeutaPorCnpj_Min
  */
@@ -516,17 +511,15 @@ async function findUserByIdentifier(pool, { email, cpf, cnpj }) {
       .input("Email", sql.NVarChar(300), valorEmail)
       .execute("dbo.sp_LoginPorEmail_Min");
 
-    const matches = (rs.recordset || []).map((row) => ({
-      tipo: normalizeTipoUsuario(row.Tipo),
-      id: Number(row.Id),
-      nome: row.Nome ?? null,
-      email: row.Email ?? valorEmail,
-      senhaHash: row.SenhaHash,
-      ativo: to01(row.Ativo, 0),
-      isBloqueado: to01(row.IsBloqueado, 0),
-      cpf: row.Cpf ?? null,
-      cnpj: row.Cnpj ?? null
-    }));
+    const matches = (rs.recordset || [])
+      .map((row) => mapAuthLoginResult(row))
+      .filter(Boolean)
+      .map((usuario) => ({
+        ...usuario,
+        email: usuario.email ?? valorEmail,
+        ativo: to01(usuario.ativo, 0),
+        isBloqueado: to01(usuario.isBloqueado, 0),
+      }));
 
     // Se existir em mais de um tipo, bloquear login e forçar correção do cadastro
     if (matches.length > 1) {
@@ -544,7 +537,7 @@ async function findUserByIdentifier(pool, { email, cpf, cnpj }) {
   }
 
   // ==========================
-  // 2) BUSCA POR CPF (Paciente)
+  // 2) BUSCA POR CPF (Paciente ou Fisioterapeuta)
   // ==========================
   if (valorCpf) {
     let r;
@@ -552,25 +545,32 @@ async function findUserByIdentifier(pool, { email, cpf, cnpj }) {
       r = await pool
         .request()
         .input("Cpf", sql.NVarChar(32), valorCpf)
-        .execute("dbo.sp_LoginPacientePorCpf_Min");
+        .execute("dbo.sp_LoginPorCpf_Min");
     } catch (err) {
       log("error", "[authService] Erro ao consultar login por CPF.", { error: err?.message });
       throw new Error("Falha interna ao consultar login.");
     }
 
-    const u = r.recordset?.[0];
-    if (u) {
-      return {
-        tipo: "Paciente",
-        id: Number(u.Id),
-        nome: u.Nome ?? null,
-        email: u.Email ?? null,
-        senhaHash: u.SenhaHash,
-        ativo: to01(u.Ativo, 0),
-        isBloqueado: to01(u.IsBloqueado, 0),
-        cpf: u.CPF ?? null
-      };
+    const matches = (r.recordset || [])
+      .map((row) => mapAuthLoginResult(row))
+      .filter(Boolean)
+      .map((usuario) => ({
+        ...usuario,
+        ativo: to01(usuario.ativo, 0),
+        isBloqueado: to01(usuario.isBloqueado, 0),
+      }));
+
+    if (matches.length > 1) {
+      const tipos = matches.map((match) => match.tipo).join(", ");
+      log("warn", "[authService] Conflito de CPF entre tipos de conta.", {
+        tipos,
+      });
+      const err = new Error("CPF conflitante. Contate o suporte.");
+      err.httpStatus = 403;
+      throw err;
     }
+
+    if (matches.length === 1) return matches[0];
   }
 
   // ==========================
@@ -651,7 +651,7 @@ async function getUserByTipoId(pool, tipo, id) {
   if (t === "Fisioterapeuta") {
     // OBS: se houver RLS, pode ser necessário criar uma SP mínima por Id.
     const r = await pool.request().input("Id", sql.Int, userId).query(`
-      SELECT TOP 1 Id, Nome, Email, CNPJ, Ativo, ISNULL(IsBloqueado, 0) AS IsBloqueado
+      SELECT TOP 1 Id, Nome, Email, TipoPessoa, CPF, CNPJ, Ativo, ISNULL(IsBloqueado, 0) AS IsBloqueado
       FROM dbo.Fisioterapeutas
       WHERE Id = @Id;
     `);
@@ -662,6 +662,8 @@ async function getUserByTipoId(pool, tipo, id) {
       id: u.Id,
       nome: u.Nome,
       email: u.Email,
+      tipoPessoa: u.TipoPessoa ?? null,
+      cpf: u.CPF ?? null,
       cnpj: u.CNPJ,
       ativo: to01(u.Ativo, 0),
       isBloqueado: to01(u.IsBloqueado, 0)
@@ -784,7 +786,7 @@ export const authService = {
    * Login:
    * - Admin: email + senha
    * - Paciente: email OU CPF + senha
-   * - Fisioterapeuta: email OU CNPJ + senha
+   * - Fisioterapeuta: email, CPF OU CNPJ + senha
    */
   async login(credenciais, reqLike = null) {
     const { email, cpf, cnpj, senha } = credenciais || {};
