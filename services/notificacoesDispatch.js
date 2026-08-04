@@ -3,6 +3,7 @@ import { ENV } from '../config/env.js';
 import { log } from '../config/logger.js';
 import { queryWithContext } from './_queryWithContext.js';
 import notificacoesService from './notificacoesService.js';
+import { montarNotificacoesCrefitoReprovado } from './crefitoReprovadoNotification.js';
 
 const REGISTRO = 'Sistema:NotificacoesDispatch';
 const CHAT_DEBOUNCE_MINUTOS = 2;
@@ -1121,6 +1122,26 @@ Equipe FisioHelp`,
   });
 }
 
+async function crefitoReprovado({ fisioterapeutaId, documentoId, motivo }) {
+  return safeDispatch('crefitoReprovado', async () => {
+    const fisio = await buscarFisioterapeutaResumo(fisioterapeutaId);
+    if (!fisio) return null;
+
+    const notificacoes = montarNotificacoesCrefitoReprovado({
+      fisioterapeutaId: fisio.Id,
+      fisioterapeutaNome: fisio.Nome,
+      documentoId,
+      motivo,
+    });
+
+    return enfileirarPushEEmail(
+      notificacoes.destinatario,
+      notificacoes.push,
+      { emailNotificacao: notificacoes.email }
+    );
+  });
+}
+
 const notificacoesDispatch = {
   consultaAgendada,
   consultaConfirmada,
@@ -1142,7 +1163,8 @@ const notificacoesDispatch = {
   chamadoAberto,
   chamadoAtualizado,
   repasseConcluido,
-  crefitoAprovado
+  crefitoAprovado,
+  crefitoReprovado
 };
 
 export {
@@ -1166,7 +1188,8 @@ export {
   chamadoAberto,
   chamadoAtualizado,
   repasseConcluido,
-  crefitoAprovado
+  crefitoAprovado,
+  crefitoReprovado
 };
 
 export default notificacoesDispatch;

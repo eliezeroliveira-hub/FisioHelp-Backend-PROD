@@ -1293,7 +1293,7 @@ const adminService = {
     }
 
     if (status === 'Reprovado') {
-      await queryWithContext(
+      const reprovacaoResult = await queryWithContext(
         usuario,
         (request) => request
           .input('Id', sql.Int, documento.Id)
@@ -1303,6 +1303,9 @@ const adminService = {
           .input('FisioId', sql.Int, fisioId)
           .input('AgoraBrasil', sql.DateTime2(7), agoraBrasil),
         `
+          SET NOCOUNT ON;
+          DECLARE @TransicaoReprovado BIT = 0;
+
           BEGIN TRY
             BEGIN TRAN;
 
@@ -1311,20 +1314,32 @@ const adminService = {
                 MotivoRejeicao = @Motivo,
                 ValidadorId    = @ValidadorId,
                 DataValidacao  = @AgoraBrasil
-            WHERE Id = @Id;
+            WHERE Id = @Id
+              AND LTRIM(RTRIM(ISNULL(Status, N''))) <> @Status;
 
-            IF @@ROWCOUNT = 0
+            IF @@ROWCOUNT > 0
+              SET @TransicaoReprovado = 1;
+            ELSE IF NOT EXISTS (
+              SELECT 1
+              FROM dbo.DocumentosFisioterapeutas
+              WHERE Id = @Id
+            )
               THROW 50001, 'Documento não encontrado.', 1;
 
-            UPDATE dbo.Fisioterapeutas
-            SET CrefitoVerificado = 0,
-                FonteVerificacao  = 'Reprovado Manualmente'
-            WHERE Id = @FisioId;
+            IF @TransicaoReprovado = 1
+            BEGIN
+              UPDATE dbo.Fisioterapeutas
+              SET CrefitoVerificado = 0,
+                  FonteVerificacao  = 'Reprovado Manualmente'
+              WHERE Id = @FisioId;
 
-            IF @@ROWCOUNT = 0
-              THROW 50002, 'Fisioterapeuta não encontrado.', 1;
+              IF @@ROWCOUNT = 0
+                THROW 50002, 'Fisioterapeuta não encontrado.', 1;
+            END
 
             COMMIT;
+
+            SELECT @TransicaoReprovado AS TransicaoReprovado;
           END TRY
           BEGIN CATCH
             IF @@TRANCOUNT > 0 ROLLBACK;
@@ -1332,6 +1347,20 @@ const adminService = {
           END CATCH
         `
       );
+
+      const houveTransicao = Number(
+        reprovacaoResult.recordset?.[0]?.TransicaoReprovado ?? 0
+      ) === 1;
+
+      if (!houveTransicao) {
+        return `CREFITO do fisioterapeuta ${fisioId} já estava reprovado. Nenhuma nova notificação foi enviada.`;
+      }
+
+      void notificacoesDispatch.crefitoReprovado({
+        fisioterapeutaId: fisioId,
+        documentoId: documento.Id,
+        motivo,
+      });
 
       return `CREFITO do fisioterapeuta ${fisioId} reprovado.`;
     }

@@ -447,6 +447,35 @@ Você poderá acompanhar as atualizações pelo aplicativo.`;
   return montarShell({ assunto, conteudoHtml, conteudoTexto });
 }
 
+function montarEmailCrefitoReprovado(dados = {}) {
+  const nome = primeiroNome(dados.fisioterapeutaNome, 'Fisioterapeuta');
+  const motivo = texto(dados.motivoRejeicao, 'Motivo não informado.');
+  const assunto = 'Seu CREFITO precisa de correção';
+
+  const conteudoHtml = `
+    <h1 style="margin:0 0 18px 0;color:#3D2B22;font-size:22px;line-height:1.3;font-weight:700;">${escapeHtml(assunto)}</h1>
+    ${paragrafoHtml(`Olá, ${nome}.`)}
+    ${paragrafoHtml('O documento do seu CREFITO não foi aprovado na verificação da FisioHelp.')}
+    ${blocoTextoHtml('Motivo informado', motivo)}
+    ${paragrafoHtml('Abra o app FisioHelp, revise o documento e faça um novo envio para análise.')}
+    ${paragrafoHtml('Assim que o novo documento for enviado, ele voltará para a fila de verificação.')}`;
+
+  const conteudoTexto = `${assunto}
+
+Olá, ${nome}.
+
+O documento do seu CREFITO não foi aprovado na verificação da FisioHelp.
+
+Motivo informado:
+${motivo}
+
+Abra o app FisioHelp, revise o documento e faça um novo envio para análise.
+
+Assim que o novo documento for enviado, ele voltará para a fila de verificação.`;
+
+  return montarShell({ assunto, conteudoHtml, conteudoTexto });
+}
+
 export function montarEmailNotificacao({ titulo, mensagem, dados = null } = {}) {
   if (dados?.emailModelo === 'lembrete_perfil_fisioterapeuta') {
     return montarEmailLembretePerfilFisioterapeuta({
@@ -468,6 +497,10 @@ export function montarEmailNotificacao({ titulo, mensagem, dados = null } = {}) 
 
   if (dados?.emailModelo === 'chamado_aberto') {
     return montarEmailChamadoAberto(dados);
+  }
+
+  if (dados?.emailModelo === 'crefito_reprovado') {
+    return montarEmailCrefitoReprovado(dados);
   }
 
   if (dados?.tipo === 'pagamento_consulta_confirmado') {
