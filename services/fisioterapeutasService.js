@@ -1111,6 +1111,8 @@ const fisioterapeutasService = {
       SELECT
         v.FisioterapeutaId,
         v.Nome,
+        f.TipoPessoa,
+        f.CPF,
         f.CNPJ,
         f.Email,
         f.EmailVerificado,

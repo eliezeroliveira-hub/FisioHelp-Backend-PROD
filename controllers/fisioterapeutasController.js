@@ -8,6 +8,7 @@ import sharp from 'sharp';
 import fileStorageProvider from '../providers/fileStorageProvider.js';
 import { createHeicPreviewFromFile, getHeicPreviewRelativePath, isHeicStoragePath } from '../utils/heicPreview.js';
 import { formatAppDateTimeLocalIso } from '../utils/appDateTime.js';
+import { protegerPerfilPublicoDeCpf } from '../utils/profilePrivacy.js';
 
 // Helpers
 const asTipo = (u) => String(u?.tipo || '').toLowerCase();
@@ -118,6 +119,8 @@ function montarPerfilCompleto(f) {
     FotoPerfilUrl: fotoUrl,
 
     CREFITO: formatarCrefito(f.CREFITO, f.Estado),
+    TipoPessoa: f.TipoPessoa ?? null,
+    CPF: f.CPF ?? null,
     CNPJ: f.CNPJ ?? null,
     CrefitoVerificado: f.CrefitoVerificado,
 
@@ -158,14 +161,16 @@ function montarPerfilCompleto(f) {
 function montarPerfilPublico(f) {
   if (!f) return null;
 
+  const publico = protegerPerfilPublicoDeCpf(f);
+
   return {
-    ...f,
-    DataCadastro: f.DataCadastro ? formatAppDateTimeLocalIso(f.DataCadastro) : null,
-    FotoPerfilUrl: normalizarFotoPerfilUrl(f.FotoPerfilUrl ?? null),
-    CREFITO: formatarCrefito(f.CREFITO, f.Estado),
-    CrefitoVerificado: toBool(f.CrefitoVerificado),
-    EmailVerificado: toBool(f.EmailVerificado),
-    TelefoneVerificado: toBool(f.TelefoneVerificado),
+    ...publico,
+    DataCadastro: publico.DataCadastro ? formatAppDateTimeLocalIso(publico.DataCadastro) : null,
+    FotoPerfilUrl: normalizarFotoPerfilUrl(publico.FotoPerfilUrl ?? null),
+    CREFITO: formatarCrefito(publico.CREFITO, publico.Estado),
+    CrefitoVerificado: toBool(publico.CrefitoVerificado),
+    EmailVerificado: toBool(publico.EmailVerificado),
+    TelefoneVerificado: toBool(publico.TelefoneVerificado),
   };
 }
 
@@ -282,7 +287,8 @@ const fisioterapeutasController = {
 
       let lista = await fisioterapeutasService.buscarComFiltros(filtros, usuario);
       lista = (lista || []).map((f) => {
-        const { Ativo, IsBloqueado, ...publico } = f || {};
+        const seguro = protegerPerfilPublicoDeCpf(f) || {};
+        const { Ativo, IsBloqueado, ...publico } = seguro;
         return {
           ...publico,
           FotoPerfilUrl: normalizarFotoPerfilUrl(publico.FotoPerfilUrl ?? null),

@@ -357,12 +357,14 @@ const adminService = {
     const limitNum  = Math.min(Math.max(Number(limit)  || 20, 1), 100);
     const offsetNum = Math.max(Number(offset) || 0, 0);
     const buscaCnpj = busca ? normalizeCNPJ(busca) : '';
+    const buscaCpf = busca ? String(busca).replace(/\D/g, '') : '';
 
     const r = await queryWithContext(
       usuario,
       (req) => req
         .input('Busca',   sql.NVarChar(200), busca  ? `%${busca}%` : null)
         .input('BuscaCnpj', sql.NVarChar(20), buscaCnpj ? `%${buscaCnpj}%` : null)
+        .input('BuscaCpf', sql.NVarChar(20), buscaCpf ? `%${buscaCpf}%` : null)
         .input('Status',  sql.NVarChar(20),  status || null)
         .input('Limit',   sql.Int,           limitNum)
         .input('Offset',  sql.Int,           offsetNum),
@@ -373,7 +375,13 @@ const adminService = {
           f.CREFITO               AS Crefito,
           f.Email,
           f.Telefone,
+          f.TipoPessoa,
+          f.CPF,
           f.CNPJ,
+          CASE WHEN f.TipoPessoa = 'PF' THEN N'CPF' ELSE N'CNPJ' END
+                                  AS DocumentoProfissionalTipo,
+          CAST(CASE WHEN f.TipoPessoa = 'PF' THEN f.CPF ELSE f.CNPJ END AS NVARCHAR(40))
+                                  AS DocumentoProfissional,
           f.Ativo,
           f.IsBloqueado           AS Bloqueado,
           f.LinkVideoApresentacao AS LinkVideo,
@@ -385,7 +393,9 @@ const adminService = {
             f.Nome      LIKE @Busca OR
             f.Email     LIKE @Busca OR
             f.CREFITO   LIKE @Busca OR
+            f.CPF       LIKE @Busca OR
             f.CNPJ      LIKE @Busca OR
+            (@BuscaCpf IS NOT NULL AND f.CPF LIKE @BuscaCpf) OR
             (@BuscaCnpj IS NOT NULL AND f.CNPJ LIKE @BuscaCnpj) OR
             f.Telefone  LIKE @Busca
           ))
