@@ -4,15 +4,12 @@ import { log } from '../config/logger.js';
 import { queryWithContext } from './_queryWithContext.js';
 import { asaasClient } from './asaasClient.js';
 import notificacoesDispatch from './notificacoesDispatch.js';
-import { isCNPJAlfanumerico, isValidCNPJ, normalizeCNPJ } from '../utils/identityValidators.js';
 import { agoraBrasilDate } from '../utils/appDateTime.js';
-import { normalizarChavePixTelefoneAsaas } from '../utils/pixKey.js';
+import { buildAsaasTransferPayload } from '../utils/asaasTransferPayload.js';
 
 const STATUS_LOTE_ATIVO = ['Processando', 'EnviadoGateway', 'AguardandoConfirmacao'];
 const STATUS_TRANSFER_DONE = new Set(['DONE']);
 const STATUS_TRANSFER_FALHA = new Set(['FAILED', 'CANCELLED', 'CANCELED', 'REFUSED']);
-const CNPJ_ALFANUMERICO_REPASSE_MSG =
-  'CNPJ alfanumérico ainda não é suportado pelo gateway para repasse via TED ou chave Pix do tipo CNPJ. Para receber repasses, cadastre uma chave Pix do tipo e-mail, telefone ou chave aleatória.';
 
 function systemUser() {
   return { tipo: 'Admin', id: Number(ENV.SYSTEM_ADMIN_ID ?? 1) };
@@ -94,128 +91,6 @@ function getLoteIdFromExternalReference(value) {
   const match = String(value ?? '').trim().match(/^REPASSE_(\d+)$/i);
   if (!match) return null;
   return toInt(match[1]);
-}
-
-function buildDescricaoLote(lote) {
-  return text(`Repasse FisioHelp lote ${lote.Id}`, 140);
-}
-
-function onlyDigits(value) {
-  return String(value ?? '').replace(/\D/g, '');
-}
-
-function getValidCnpj(lote) {
-  const cnpj = normalizeCNPJ(lote?.CNPJ);
-  if (!isValidCNPJ(cnpj)) return null;
-  if (isCNPJAlfanumerico(cnpj)) {
-    throw new Error(CNPJ_ALFANUMERICO_REPASSE_MSG);
-  }
-  return cnpj;
-}
-
-function assertCnpjSuportadoPeloGateway(value) {
-  const cnpj = normalizeCNPJ(value);
-  if (isValidCNPJ(cnpj) && isCNPJAlfanumerico(cnpj)) {
-    throw new Error(CNPJ_ALFANUMERICO_REPASSE_MSG);
-  }
-}
-
-function hasPixDestination(lote) {
-  return Boolean(text(lote?.ChavePix, 140) && text(lote?.TipoChavePix, 20));
-}
-
-function getMetodoTransferencia(lote) {
-  return hasPixDestination(lote) ? 'PIX' : 'TED';
-}
-
-function parseBankCode(value) {
-  const raw = String(value ?? '').trim();
-  const match = raw.match(/\d{3}/);
-  return match ? match[0] : null;
-}
-
-function parseAccount(value) {
-  const raw = String(value ?? '').trim();
-  const parts = raw.toUpperCase().split('-');
-  if (parts.length >= 2 && parts[0]) {
-    const account = parts.slice(0, -1).join('');
-    const digit = parts[parts.length - 1] || '';
-    return {
-      account: onlyDigits(account),
-      accountDigit: digit.replace(/[^0-9X]/g, '').slice(0, 1) || null,
-    };
-  }
-
-  return {
-    account: onlyDigits(raw),
-    accountDigit: null,
-  };
-}
-
-function normalizeBankAccountType(value) {
-  const raw = String(value ?? '').trim().toLowerCase();
-  if (raw.includes('poup')) return 'CONTA_POUPANCA';
-  return 'CONTA_CORRENTE';
-}
-
-function buildBankAccountTransferPayload(lote) {
-  const bankCode = parseBankCode(lote.Banco);
-  const agency = onlyDigits(lote.Agencia);
-  const { account, accountDigit } = parseAccount(lote.Conta);
-  const cpfCnpj = getValidCnpj(lote);
-  const ownerName = text(lote.NomeFisioterapeuta ?? lote.Nome, 100);
-
-  if (!bankCode || !agency || !account || !accountDigit || !cpfCnpj || !ownerName) {
-    throw new Error('Dados bancários do fisioterapeuta incompletos: banco, agência, conta com dígito, titular e CNPJ válido são obrigatórios para repasse TED.');
-  }
-
-  const bankAccount = {
-    bank: { code: bankCode },
-    ownerName,
-    cpfCnpj,
-    agency,
-    account,
-    bankAccountType: normalizeBankAccountType(lote.TipoContaBancaria),
-  };
-
-  if (accountDigit) {
-    bankAccount.accountDigit = accountDigit;
-  }
-
-  return {
-    value: toMoney(lote.ValorTransferencia),
-    bankAccount,
-    operationType: 'TED',
-    externalReference: `REPASSE_${lote.Id}`,
-  };
-}
-
-function buildAsaasTransferPayload(lote) {
-  if (!hasPixDestination(lote)) {
-    return buildBankAccountTransferPayload(lote);
-  }
-
-  const tipoChavePix = String(lote?.TipoChavePix ?? '').trim().toUpperCase();
-  if (tipoChavePix === 'CNPJ') {
-    assertCnpjSuportadoPeloGateway(lote?.ChavePix ?? lote?.CNPJ);
-  }
-
-  let chavePix = text(lote.ChavePix, 140);
-  if (tipoChavePix === 'PHONE') {
-    chavePix = normalizarChavePixTelefoneAsaas(lote.ChavePix);
-    if (!chavePix) {
-      throw new Error('Chave Pix telefone inválida para transferência. Use DDD + número de celular com 11 dígitos.');
-    }
-  }
-
-  return {
-    value: toMoney(lote.ValorTransferencia),
-    operationType: 'PIX',
-    pixAddressKey: chavePix,
-    pixAddressKeyType: tipoChavePix,
-    description: buildDescricaoLote(lote),
-    externalReference: `REPASSE_${lote.Id}`,
-  };
 }
 
 function isDone(status) {
@@ -422,7 +297,16 @@ const repassesGatewayService = {
                   AND NULLIF(LTRIM(RTRIM(ISNULL(f.Agencia, N''))), N'') IS NOT NULL
                   AND NULLIF(LTRIM(RTRIM(ISNULL(f.Conta, N''))), N'') IS NOT NULL
                   AND NULLIF(LTRIM(RTRIM(ISNULL(f.TipoContaBancaria, N''))), N'') IS NOT NULL
-                  AND NULLIF(LTRIM(RTRIM(ISNULL(f.CNPJ, N''))), N'') IS NOT NULL
+                  AND (
+                    (
+                      f.TipoPessoa = N'PF'
+                      AND NULLIF(LTRIM(RTRIM(ISNULL(f.CPF, N''))), N'') IS NOT NULL
+                    )
+                    OR (
+                      f.TipoPessoa = N'PJ'
+                      AND NULLIF(LTRIM(RTRIM(ISNULL(f.CNPJ, N''))), N'') IS NOT NULL
+                    )
+                  )
                 )
               )
               AND NOT EXISTS (
@@ -536,7 +420,16 @@ const repassesGatewayService = {
                     AND NULLIF(LTRIM(RTRIM(ISNULL(f.Agencia, N''))), N'') IS NOT NULL
                     AND NULLIF(LTRIM(RTRIM(ISNULL(f.Conta, N''))), N'') IS NOT NULL
                     AND NULLIF(LTRIM(RTRIM(ISNULL(f.TipoContaBancaria, N''))), N'') IS NOT NULL
-                    AND NULLIF(LTRIM(RTRIM(ISNULL(f.CNPJ, N''))), N'') IS NOT NULL
+                    AND (
+                      (
+                        f.TipoPessoa = N'PF'
+                        AND NULLIF(LTRIM(RTRIM(ISNULL(f.CPF, N''))), N'') IS NOT NULL
+                      )
+                      OR (
+                        f.TipoPessoa = N'PJ'
+                        AND NULLIF(LTRIM(RTRIM(ISNULL(f.CNPJ, N''))), N'') IS NOT NULL
+                      )
+                    )
                   )
                 )
                 AND NOT EXISTS (
@@ -800,6 +693,8 @@ const repassesGatewayService = {
           SELECT TOP (0)
             l.*,
             f.Nome AS NomeFisioterapeuta,
+            f.TipoPessoa,
+            f.CPF,
             f.CNPJ,
             f.Banco,
             f.Agencia,
@@ -815,6 +710,8 @@ const repassesGatewayService = {
           SELECT TOP (1)
             l.*,
             f.Nome AS NomeFisioterapeuta,
+            f.TipoPessoa,
+            f.CPF,
             f.CNPJ,
             f.Banco,
             f.Agencia,

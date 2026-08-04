@@ -17,23 +17,26 @@ import contatoProvider from '../providers/contatoProvider.js';
 import { HttpError } from '../utils/httpError.js';
 import { getContatoSecret } from '../utils/contactSecret.js';
 import {
-  isCNPJAlfanumerico,
-  isValidCNPJ,
   isValidCPF,
   isValidEmail,
-  normalizeCNPJ,
   normalizeEmail as normalizeEmailAddress,
 } from '../utils/identityValidators.js';
 import { validatePasswordStrength } from '../utils/passwordPolicy.js';
 import fileStorageProvider from '../providers/fileStorageProvider.js';
 import { getHeicPreviewRelativePath, isHeicStoragePath } from '../utils/heicPreview.js';
-import { normalizarChavePixTelefoneAsaas } from '../utils/pixKey.js';
+import {
+  normalizarChavePixAsaas,
+  normalizarTipoChavePixAsaas,
+} from '../utils/pixKey.js';
 import { agoraAppDate } from '../utils/appDateTime.js';
 import { normalizarDocumentoProfissional } from '../utils/professionalDocument.js';
+import {
+  obterDocumentoTitularParaGateway,
+  resolverTitularFinanceiro,
+  validarChavePixDocumentalDoTitular,
+} from '../utils/professionalFinancial.js';
 
 const APP_TIME_ZONE = 'America/Sao_Paulo';
-const CNPJ_ALFANUMERICO_REPASSE_MSG =
-  'CNPJ alfanumérico ainda não é suportado pelo gateway para repasse via TED ou chave Pix do tipo CNPJ. Para receber repasses, cadastre uma chave Pix do tipo e-mail, telefone ou chave aleatória.';
 
 function contextoSistema() {
   return { tipo: 'Admin', id: Number(ENV.SYSTEM_ADMIN_ID ?? 1) };
@@ -178,50 +181,6 @@ function normalizeOptionalInt(value, label, { min = Number.MIN_SAFE_INTEGER, max
   return n;
 }
 
-const PIX_TIPOS_VALIDOS = new Set(['CNPJ', 'EMAIL', 'PHONE', 'EVP']);
-
-function normalizarTipoChavePix(value) {
-  const raw = String(value ?? '').trim().toUpperCase();
-  if (!raw) return null;
-  if (raw === 'TELEFONE' || raw === 'CELULAR') return 'PHONE';
-  if (raw === 'ALEATORIA' || raw === 'ALEATÓRIA' || raw === 'CHAVE_ALEATORIA') return 'EVP';
-  return PIX_TIPOS_VALIDOS.has(raw) ? raw : null;
-}
-
-function normalizarChavePix(tipo, value) {
-  const raw = String(value ?? '').trim();
-  if (!raw) return null;
-
-  if (tipo === 'CNPJ') {
-    const cnpj = normalizeCNPJ(raw);
-    if (!isValidCNPJ(cnpj)) throw new HttpError(400, 'Chave Pix CNPJ inválida.');
-    if (isCNPJAlfanumerico(cnpj)) throw new HttpError(400, CNPJ_ALFANUMERICO_REPASSE_MSG);
-    return cnpj;
-  }
-
-  if (tipo === 'EMAIL') {
-    const email = normalizarEmail(raw);
-    if (!isValidEmail(email)) throw new HttpError(400, 'Chave Pix e-mail inválida.');
-    return email;
-  }
-
-  if (tipo === 'PHONE') {
-    const phone = normalizarChavePixTelefoneAsaas(raw);
-    if (!phone) throw new HttpError(400, 'Chave Pix telefone inválida. Use DDD + número de celular com 11 dígitos.');
-    return phone;
-  }
-
-  if (tipo === 'EVP') {
-    const evp = raw.toLowerCase();
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(evp)) {
-      throw new HttpError(400, 'Chave Pix aleatória inválida. Informe a chave no formato UUID.');
-    }
-    return evp;
-  }
-
-  throw new HttpError(400, 'Tipo de chave Pix inválido.');
-}
-
 function normalizarAgenciaBancaria(value) {
   const digits = String(value ?? '').replace(/\D/g, '');
   if (!digits || digits.length > 6) {
@@ -254,23 +213,18 @@ function normalizarBancoParaRepasse(value) {
   return banco;
 }
 
-async function validarCnpjRepasseAutomatico(ctx, fisioterapeutaId) {
-  const cnpjAtualResult = await queryWithContext(ctx, (req) => {
+async function carregarTitularFinanceiro(ctx, fisioterapeutaId) {
+  const titularResult = await queryWithContext(ctx, (req) => {
     req.input('Id', sql.Int, fisioterapeutaId);
   }, `
-    SELECT TOP (1) CNPJ
+    SELECT TOP (1) TipoPessoa, CPF, CNPJ
     FROM dbo.Fisioterapeutas
     WHERE Id = @Id;
   `);
 
-  const cnpjAtual = normalizeCNPJ(cnpjAtualResult.recordset?.[0]?.CNPJ ?? '');
-  if (!isValidCNPJ(cnpjAtual)) {
-    throw new HttpError(400, 'CNPJ do fisioterapeuta inválido. Corrija o cadastro antes de salvar dados bancários.');
-  }
-  if (isCNPJAlfanumerico(cnpjAtual)) {
-    throw new HttpError(400, CNPJ_ALFANUMERICO_REPASSE_MSG);
-  }
-  return cnpjAtual;
+  const row = titularResult.recordset?.[0];
+  if (!row) throw new HttpError(404, 'Fisioterapeuta não encontrado.');
+  return resolverTitularFinanceiro(row);
 }
 
 function gerarSalt16() {
@@ -2002,6 +1956,14 @@ const fisioterapeutasService = {
       Object.prototype.hasOwnProperty.call(dados || {}, 'Conta') ||
       Object.prototype.hasOwnProperty.call(dados || {}, 'TipoContaBancaria');
 
+    let titularFinanceiro = null;
+    const obterTitularFinanceiro = async () => {
+      if (!titularFinanceiro) {
+        titularFinanceiro = await carregarTitularFinanceiro(ctx, id);
+      }
+      return titularFinanceiro;
+    };
+
     if (bancoFoiInformado) {
       const bancoVazio = dados.Banco == null || String(dados.Banco).trim() === '';
       const agenciaVazia = dados.Agencia == null || String(dados.Agencia).trim() === '';
@@ -2019,7 +1981,7 @@ const fisioterapeutasService = {
         dados.Conta = normalizarContaBancaria(dados.Conta);
         dados.TipoContaBancaria = normalizarTipoContaBancaria(dados.TipoContaBancaria);
 
-        await validarCnpjRepasseAutomatico(ctx, id);
+        obterDocumentoTitularParaGateway(await obterTitularFinanceiro());
       }
     }
 
@@ -2033,10 +1995,17 @@ const fisioterapeutasService = {
         dados.ChavePix = null;
         dados.TipoChavePix = null;
       } else {
-        const tipoPix = normalizarTipoChavePix(tipoRaw);
+        const tipoPix = normalizarTipoChavePixAsaas(tipoRaw);
         if (!tipoPix) throw new HttpError(400, 'Tipo de chave Pix inválido.');
         dados.TipoChavePix = tipoPix;
-        dados.ChavePix = normalizarChavePix(tipoPix, chaveRaw);
+        dados.ChavePix = normalizarChavePixAsaas(tipoPix, chaveRaw);
+
+        if (tipoPix === 'CPF' || tipoPix === 'CNPJ') {
+          validarChavePixDocumentalDoTitular(
+            { tipoChavePix: tipoPix, chavePix: dados.ChavePix },
+            await obterTitularFinanceiro()
+          );
+        }
       }
     }
 
