@@ -3,8 +3,11 @@ import { sql } from '../config/dbConfig.js';
 import { queryWithContext } from './_queryWithContext.js';
 import PDFDocument from 'pdfkit';
 import { HttpError } from '../utils/httpError.js';
-import { createHash } from 'crypto';
 import { agoraBrasilDate } from '../utils/appDateTime.js';
+import {
+  criarHashAssinaturaProntuario,
+  PRONTUARIO_SIGNATURE_CONTENT_FIELDS,
+} from '../utils/prontuarioSignature.js';
 
 function isFisio(usuario) {
   return String(usuario?.tipo || '').toLowerCase() === 'fisioterapeuta';
@@ -307,6 +310,7 @@ async function sincronizarCamposAutomaticosDoProntuario(usuario, prontuario) {
   setIfBlank('PacienteProfissao', 'PacienteProfissao', sql.NVarChar(240), prontuario.PacienteProfissao, snap.PacienteProfissao);
   setIfBlank('PacienteEnderecoComercial', 'PacienteEnderecoComercial', sql.NVarChar(1600), prontuario.PacienteEnderecoComercial, snap.ProntuarioEnderecoComercial);
   setIfBlank('PacienteCep', 'PacienteCep', sql.NVarChar(18), prontuario.PacienteCep, snap.PacienteCep);
+  setIfBlank('PacienteCepComercial', 'PacienteCepComercial', sql.NVarChar(18), prontuario.PacienteCepComercial, snap.PacienteCepComercial);
   setIfBlank('ProfissionalNome', 'ProfissionalNome', sql.NVarChar(600), prontuario.ProfissionalNome, snap.ProfissionalNome);
   setIfBlank('ProfissionalCrefito', 'ProfissionalCrefito', sql.NVarChar(60), prontuario.ProfissionalCrefito, snap.ProfissionalCrefito);
 
@@ -327,6 +331,13 @@ async function sincronizarCamposAutomaticosDoProntuario(usuario, prontuario) {
     snap.DataRegistroProcedimentos
   );
 
+  if (prontuario.AssinadoEm && updates.length) {
+    updates.push('AssinadoEm = NULL');
+    updates.push('AssinadoPorId = NULL');
+    updates.push('HashConteudo = NULL');
+    updates.push('IpAssinatura = NULL');
+    updates.push('ProfissionalAssinatura = NULL');
+  }
 
   if (!updates.length) return await enriquecerProntuario(usuario, prontuario);
 
@@ -998,6 +1009,7 @@ const prontuariosService = {
     sets.push('AssinadoEm = NULL');
     sets.push('AssinadoPorId = NULL');
     sets.push('HashConteudo = NULL');
+    sets.push('IpAssinatura = NULL');
     sets.push('ProfissionalAssinatura = NULL');
   }
 
@@ -1044,25 +1056,15 @@ async assinar(usuario, pacienteId, { ip = null } = {}) {
 
   await assertFisioAtendeuPaciente(usuario, pid);
 
-  const prontuario = await this._obterRaw(usuario, pid);
+  let prontuario = await this._obterRaw(usuario, pid);
   if (!prontuario) throw new HttpError(404, 'Prontuário não encontrado para este paciente.');
+
+  // Consolida os campos automáticos antes de produzir o snapshot assinado.
+  prontuario = await sincronizarCamposAutomaticosDoProntuario(usuario, prontuario);
 
   if (prontuario.AssinadoEm && Number(prontuario.AssinadoPorId) === Number(usuario.id)) {
     return await enriquecerProntuario(usuario, prontuario);
   }
-
-  const conteudoParaHash = JSON.stringify({
-    Id: prontuario.Id,
-    PacienteId: prontuario.PacienteId,
-    FisioterapeutaId: prontuario.FisioterapeutaId,
-    QueixaPrincipal: prontuario.QueixaPrincipal,
-    HistoriaClinica: prontuario.HistoriaClinica,
-    DiagnosticoFisioterapeutico: prontuario.DiagnosticoFisioterapeutico,
-    PlanoTerapeutico: prontuario.PlanoTerapeutico,
-    Evolucao: prontuario.Evolucao,
-    DataUltimaAtualizacao: prontuario.DataUltimaAtualizacao,
-  });
-  const hash = createHash('sha256').update(conteudoParaHash, 'utf8').digest('hex');
 
   const ipNorm = ip ? String(ip).trim().slice(0, 120) : null;
   const fisioId = Number(usuario.id);
@@ -1079,6 +1081,13 @@ async assinar(usuario, pacienteId, { ip = null } = {}) {
   });
   const dataFormatada = formatter.format(agoraReal).replace(',', '');
   const textoAssinatura = `${prontuario.ProfissionalNome ?? ''} - CREFITO ${prontuario.ProfissionalCrefito ?? ''} - ${dataFormatada}`.trim();
+  const { hash } = criarHashAssinaturaProntuario(prontuario, {
+    DataUltimaAtualizacao: agoraBrasil,
+    AssinadoEm: agoraBrasil,
+    AssinadoPorId: fisioId,
+    IpAssinatura: ipNorm,
+    ProfissionalAssinatura: textoAssinatura,
+  });
 
   const result = await queryWithContext(usuario, (req) => {
     req.input('Id', sql.Int, prontuario.Id);
@@ -1175,50 +1184,12 @@ function formatDateBR(v) {
   return `${dd}/${mm}/${yyyy}`;
 }
 
-const PRONTUARIO_PDF_COMPLETE_FIELDS = Object.freeze([
-  'DataCriacao',
-  'DataUltimaAtualizacao',
-  'DataRegistroProcedimentos',
-  'PacienteNomeCompleto',
-  'PacienteNaturalidade',
-  'PacienteEstadoCivil',
-  'PacienteGenero',
-  'PacienteLocalNascimento',
-  'PacienteDataNascimento',
-  'PacienteProfissao',
-  'PacienteEnderecoComercial',
-  'PacienteEnderecoResidencial',
-  'PacienteCep',
-  'PacienteCepComercial',
-  'ProfissionalNome',
-  'ProfissionalCrefito',
-  'HistoriaClinica',
-  'DetalhamentoCaso',
-  'PlanoTerapeutico',
-  'QueixaPrincipal',
-  'HabitosDeVida',
-  'HistoriaAtual',
-  'HistoriaPregressa',
-  'AntecedentesPessoais',
-  'AntecedentesFamiliares',
-  'TratamentosRealizados',
-  'ExameClinicoFisico',
-  'ExamesComplementares',
-  'DiagnosticoFisioterapeutico',
-  'PrognosticoFisioterapeutico',
-  'PlanoTerapeuticoDetalhado',
-  'QuantidadeProvavelAtendimentos',
-  'Evolucao',
-  'DataEvolucao',
-  'Intercorrencias',
-]);
-
 const MAX_PRONTUARIO_PDF_TEXT_BYTES = 2_000_000; // ~2MB de texto agregado
 const MAX_PRONTUARIO_PDF_BYTES = 10 * 1024 * 1024; // 10MB de PDF final
 
 function estimateProntuarioPdfTextBytes(prontuario) {
   let total = 0;
-  for (const k of PRONTUARIO_PDF_COMPLETE_FIELDS) {
+  for (const k of PRONTUARIO_SIGNATURE_CONTENT_FIELDS) {
     if (!Object.prototype.hasOwnProperty.call(prontuario, k)) continue;
     const v = prontuario[k];
     if (v === null || v === undefined) continue;
