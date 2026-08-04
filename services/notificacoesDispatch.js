@@ -137,6 +137,8 @@ async function buscarConsultaResumo(consultaId) {
       p.CepComercial AS PacienteCepComercial,
       f.Nome AS FisioterapeutaNome,
       f.CREFITO AS FisioterapeutaCrefito,
+      f.TipoPessoa AS FisioterapeutaTipoPessoa,
+      f.CPF AS FisioterapeutaCpf,
       f.CNPJ AS FisioterapeutaCnpj,
       ISNULL(e.Nome, f.Especialidade) AS EspecialidadeNome
     FROM dbo.Consultas c
@@ -594,6 +596,8 @@ async function consultaCancelada({ consultaId, motivo = null, origem = null }) {
             consultaId: Number(consulta.Id),
             dataConsultaTexto: data,
             fisioterapeutaNome: consulta.FisioterapeutaNome ?? null,
+            fisioterapeutaTipoPessoa: consulta.FisioterapeutaTipoPessoa ?? null,
+            fisioterapeutaCpf: consulta.FisioterapeutaCpf ?? null,
             fisioterapeutaCnpj: consulta.FisioterapeutaCnpj ?? null,
           })
         }
@@ -684,6 +688,10 @@ async function pagamentoConfirmadoConsulta({ transacaoId = null, consultaId = nu
     const payload = dadosBase('pagamento_consulta_confirmado', {
       consultaId: Number(consulta.Id),
       transacaoId: asId(transacaoId),
+    });
+    const emailDados = dadosBase('pagamento_consulta_confirmado', {
+      consultaId: Number(consulta.Id),
+      transacaoId: asId(transacaoId),
       codigoContratacao: `AGD-${new Date().getFullYear()}-${String(Number(consulta.Id)).padStart(6, '0')}`,
       contratacaoEm: new Date().toISOString(),
       pacienteId: Number(consulta.PacienteId),
@@ -691,21 +699,34 @@ async function pagamentoConfirmadoConsulta({ transacaoId = null, consultaId = nu
       fisioterapeutaId: Number(consulta.FisioterapeutaId),
       fisioterapeutaNome: consulta.FisioterapeutaNome ?? null,
       fisioterapeutaCrefito: consulta.FisioterapeutaCrefito ?? null,
+      fisioterapeutaTipoPessoa: consulta.FisioterapeutaTipoPessoa ?? null,
+      fisioterapeutaCpf: consulta.FisioterapeutaCpf ?? null,
       fisioterapeutaCnpj: consulta.FisioterapeutaCnpj ?? null,
       dataHoraConsulta: consulta.DataHora ?? null,
       dataConsultaTexto: data,
       enderecoAtendimento: enderecoAtendimentoConsulta(consulta) || null,
       valorTotal: consulta.ValorConsulta ?? null
     });
+    const mensagemPagamento =
+      `Recebemos seu pagamento referente à consulta${data ? ` de ${data}` : ''}.`;
 
     return enfileirarPushEEmail(
       { usuarioTipo: 'Paciente', usuarioId: consulta.PacienteId },
       {
         tipo: 'Pagamento',
         titulo: 'Pagamento confirmado',
-        mensagem: `Recebemos seu pagamento referente à consulta${data ? ` de ${data}` : ''}.`,
+        mensagem: mensagemPagamento,
         referenciaId: Number(consulta.Id),
         dados: payload
+      },
+      {
+        emailNotificacao: {
+          tipo: 'Pagamento',
+          titulo: 'Pagamento confirmado',
+          mensagem: mensagemPagamento,
+          referenciaId: Number(consulta.Id),
+          dados: emailDados,
+        }
       }
     );
   });

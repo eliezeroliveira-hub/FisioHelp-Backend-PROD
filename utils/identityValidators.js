@@ -30,6 +30,16 @@ export function isValidCPF(value) {
   return true;
 }
 
+export function formatCPF(value) {
+  const cpf = String(value ?? '').replace(/\D/g, '');
+  if (/^\d{11}$/.test(cpf)) {
+    return `${cpf.slice(0, 3)}.${cpf.slice(3, 6)}.${cpf.slice(6, 9)}-${cpf.slice(9)}`;
+  }
+
+  const raw = String(value ?? '').trim();
+  return raw || null;
+}
+
 const CNPJ_ZERO = '00000000000000';
 const CNPJ_BASE_LENGTH = 12;
 const CNPJ_FULL_REGEX = /^[A-Z\d]{12}\d{2}$/;

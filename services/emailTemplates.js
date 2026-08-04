@@ -1,5 +1,5 @@
-import { formatCNPJ } from '../utils/identityValidators.js';
 import { montarEmailLembretePerfilFisioterapeuta } from './perfilFisioterapeutaEmailTemplate.js';
+import { montarDocumentoProfissionalApresentacao } from '../utils/professionalDocumentPresentation.js';
 
 const FOOTER = 'Mensagem automática — esta caixa não é monitorada. Fale com suporte@fisiohelp.com.br.';
 const FALLBACK_SUBJECT = 'Mensagem da FisioHelp';
@@ -40,10 +40,6 @@ function formatarMoeda(valor) {
   const numero = Number(valor);
   if (!Number.isFinite(numero) || numero <= 0) return null;
   return numero.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
-
-function formatarCnpj(value) {
-  return formatCNPJ(value);
 }
 
 function formatarDataHora(value) {
@@ -214,7 +210,11 @@ function montarEmailPagamentoConsulta(dados = {}) {
   const valorTotal = formatarMoeda(dados.valorTotal);
   const endereco = texto(dados.enderecoAtendimento, 'Endereço cadastrado na plataforma');
   const crefito = texto(dados.fisioterapeutaCrefito, 'não informado');
-  const cnpj = texto(formatarCnpj(dados.fisioterapeutaCnpj), 'não informado');
+  const documentoProfissional = montarDocumentoProfissionalApresentacao({
+    TipoPessoa: dados.fisioterapeutaTipoPessoa,
+    CPF: dados.fisioterapeutaCpf,
+    CNPJ: dados.fisioterapeutaCnpj,
+  });
   const codigo = texto(dados.codigoContratacao, codigoContratacao(consultaId, contratacaoEm));
   const numeroAgendamento = Number.isInteger(consultaId) && consultaId > 0 ? `#${consultaId}` : '-';
   const dataContratacao = formatarDataHora(contratacaoEm) || texto(contratacaoEm, '-');
@@ -227,7 +227,7 @@ function montarEmailPagamentoConsulta(dados = {}) {
     linhaResumo('Status de pagamento', 'Confirmado'),
     linhaResumo('Profissional', fisioterapeutaNome),
     linhaResumo('Registro profissional', `CREFITO ${crefito}`),
-    linhaResumo('CNPJ do Profissional', cnpj),
+    linhaResumo(documentoProfissional.rotulo, documentoProfissional.valorFormatado),
     linhaResumo('Data', dataConsulta),
     linhaResumo('Hora', horaConsulta),
     linhaResumo('Local de atendimento', endereco),
@@ -282,7 +282,7 @@ Resumo da Consulta
 
 Profissional: ${fisioterapeutaNome}
 Registro profissional: CREFITO ${crefito}
-CNPJ do Profissional: ${cnpj}
+${documentoProfissional.rotulo}: ${documentoProfissional.valorFormatado}
 Data e hora: ${dataConsulta || '-'}${horaConsulta ? ` às ${horaConsulta}` : ''}
 Local de atendimento: ${endereco}
 Valor total: ${valorTotal || '-'}
@@ -332,7 +332,11 @@ function montarEmailConsultaCanceladaPaciente(dados = {}) {
   const numeroConsulta = Number.isInteger(consultaId) && consultaId > 0 ? String(consultaId) : '-';
   const fisioterapeutaNome = texto(dados.fisioterapeutaNome, 'o fisioterapeuta');
   const data = texto(dados.dataConsultaTexto, 'data/hora informada no aplicativo');
-  const cnpj = texto(formatarCnpj(dados.fisioterapeutaCnpj), 'não informado');
+  const documentoPrestador = montarDocumentoProfissionalApresentacao({
+    TipoPessoa: dados.fisioterapeutaTipoPessoa,
+    CPF: dados.fisioterapeutaCpf,
+    CNPJ: dados.fisioterapeutaCnpj,
+  }, { papel: 'Prestador' });
   const assunto = 'Cancelamento da consulta recebido';
 
   const conteudoHtml = `
@@ -341,7 +345,7 @@ function montarEmailConsultaCanceladaPaciente(dados = {}) {
     ${tituloSecaoHtml('Resumo da consulta cancelada')}
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 22px 0;border-top:1px solid rgba(61,43,34,0.10);border-bottom:1px solid rgba(61,43,34,0.10);">
       ${linhaResumo('Profissional', fisioterapeutaNome)}
-      ${linhaResumo('CNPJ do Prestador', cnpj)}
+      ${linhaResumo(documentoPrestador.rotulo, documentoPrestador.valorFormatado)}
     </table>
     ${paragrafoHtml('Sua solicitação foi registrada na plataforma FisioHelp e será processada conforme as regras aplicáveis dos Termos de Uso e da legislação vigente.')}
     ${paragrafoHtml('Quando houver valor pago elegível à devolução, a FisioHelp comunicará a instituição financeira ou administradora do meio de pagamento para que o estorno seja processado. O prazo de efetivação poderá variar conforme o método de pagamento e as regras da instituição responsável.')}
@@ -354,7 +358,7 @@ Confirmamos o recebimento da sua solicitação de cancelamento referente à cons
 Resumo da consulta cancelada:
 
 Profissional: ${fisioterapeutaNome}
-CNPJ do Prestador: ${cnpj}
+${documentoPrestador.rotulo}: ${documentoPrestador.valorFormatado}
 
 Sua solicitação foi registrada na plataforma FisioHelp e será processada conforme as regras aplicáveis dos Termos de Uso e da legislação vigente.
 
