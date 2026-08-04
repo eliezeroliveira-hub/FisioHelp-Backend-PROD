@@ -13,6 +13,7 @@ import {
 import { HttpError } from '../utils/httpError.js';
 import { log } from '../config/logger.js';
 import { agoraBrasilDate, getAppTimeZoneParts } from '../utils/appDateTime.js';
+import { montarPrestadorCheckout } from '../utils/professionalCheckout.js';
 
 /**
  * Executa uma query garantindo SESSION_CONTEXT no MESMO batch/Request.
@@ -1432,7 +1433,11 @@ async function prepararDadosCriacaoConsulta(
 
   const fisio = await queryWithContext(usuario, (req) => {
     req.input('FisioterapeutaId', sql.Int, fid);
-  }, `SELECT Estado, CREFITO, CrefitoVerificado FROM dbo.Fisioterapeutas WHERE Id = @FisioterapeutaId;`);
+  }, `
+    SELECT Estado, CREFITO, CrefitoVerificado, TipoPessoa, CPF, CNPJ
+    FROM dbo.Fisioterapeutas
+    WHERE Id = @FisioterapeutaId;
+  `);
 
   if (!paciente.recordset?.length || !fisio.recordset?.length) {
     throw new HttpError(404, 'Paciente ou Fisioterapeuta não encontrado.');
@@ -1442,6 +1447,7 @@ async function prepararDadosCriacaoConsulta(
   const estadoFisio = fisio.recordset[0].Estado;
   const crefito = fisio.recordset[0].CREFITO;
   const crefitoVerificado = fisio.recordset[0].CrefitoVerificado;
+  const prestador = montarPrestadorCheckout(fisio.recordset[0]);
 
   if (!crefitoVerificado) {
     throw new HttpError(403, 'Este fisioterapeuta ainda não pode atender: CREFITO pendente de verificação.');
@@ -1471,7 +1477,8 @@ async function prepararDadosCriacaoConsulta(
     valorFinal,
     duracaoMin,
     origemAgendamento: 'PacienteApp',
-    especialidadeId: especialidadeIdFinal
+    especialidadeId: especialidadeIdFinal,
+    prestador
   };
 }
 
@@ -2458,7 +2465,8 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
       observacoes,
       valorFinal,
       origemAgendamento,
-      especialidadeId
+      especialidadeId,
+      prestador
     } = await prepararDadosCriacaoConsulta(
       { PacienteId, FisioterapeutaId, DataHora, Observacoes, ValorConsulta, DuracaoMinutos, EspecialidadeId },
       usuario
@@ -2610,6 +2618,7 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
         PodePagarComCreditos: precisaPagamento && saldoCarteira >= valorConsulta,
         PodePagarComPacote: precisaPagamento && totalSessoesPacoteDisponiveis > 0,
         PacotesDisponiveis: totalSessoesPacoteDisponiveis,
+        Prestador: prestador,
         ResumoFinanceiro: {
           ValorSessao: Number(row.ResumoValorSessao ?? 0) || 0,
           TaxaServico: Number(row.ResumoTaxaServico ?? 0) || 0,

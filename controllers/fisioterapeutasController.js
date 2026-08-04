@@ -8,7 +8,7 @@ import sharp from 'sharp';
 import fileStorageProvider from '../providers/fileStorageProvider.js';
 import { createHeicPreviewFromFile, getHeicPreviewRelativePath, isHeicStoragePath } from '../utils/heicPreview.js';
 import { formatAppDateTimeLocalIso } from '../utils/appDateTime.js';
-import { protegerPerfilPublicoDeCpf } from '../utils/profilePrivacy.js';
+import { protegerPerfilPublicoDeDocumento } from '../utils/profilePrivacy.js';
 
 // Helpers
 const asTipo = (u) => String(u?.tipo || '').toLowerCase();
@@ -161,7 +161,7 @@ function montarPerfilCompleto(f) {
 function montarPerfilPublico(f) {
   if (!f) return null;
 
-  const publico = protegerPerfilPublicoDeCpf(f);
+  const publico = protegerPerfilPublicoDeDocumento(f);
 
   return {
     ...publico,
@@ -287,7 +287,7 @@ const fisioterapeutasController = {
 
       let lista = await fisioterapeutasService.buscarComFiltros(filtros, usuario);
       lista = (lista || []).map((f) => {
-        const seguro = protegerPerfilPublicoDeCpf(f) || {};
+        const seguro = protegerPerfilPublicoDeDocumento(f) || {};
         const { Ativo, IsBloqueado, ...publico } = seguro;
         return {
           ...publico,

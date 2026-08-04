@@ -4,7 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { protegerPerfilPublicoDeCpf } from '../utils/profilePrivacy.js';
+import { protegerPerfilPublicoDeDocumento } from '../utils/profilePrivacy.js';
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, '..');
@@ -13,36 +13,30 @@ function readProjectFile(relativePath) {
   return fs.readFileSync(path.join(projectRoot, relativePath), 'utf8');
 }
 
-test('remove CPF e aliases equivalentes do perfil público', () => {
-  const publico = protegerPerfilPublicoDeCpf({
+test('remove todos os documentos e metadados profissionais do perfil público', () => {
+  const publico = protegerPerfilPublicoDeDocumento({
     Id: 9,
     CPF: '52998224725',
     cpf: '52998224725',
     Cpf: '52998224725',
     FisioterapeutaCPF: '52998224725',
+    CNPJ: '11222333000181',
+    FisioterapeutaCnpj: '11222333000181',
     TipoPessoa: 'PF',
     DocumentoProfissionalTipo: 'CPF',
     DocumentoProfissionalMascarado: '***.***.***-25',
+    CREFITO: '356852-F',
   });
 
   assert.deepEqual(publico, {
     Id: 9,
-    TipoPessoa: 'PF',
-    DocumentoProfissionalTipo: 'CPF',
-    DocumentoProfissionalMascarado: '***.***.***-25',
+    CREFITO: '356852-F',
   });
 });
 
-test('preserva CNPJ público para retrocompatibilidade de fisioterapeuta PJ', () => {
-  const publico = protegerPerfilPublicoDeCpf({
-    TipoPessoa: 'PJ',
-    CNPJ: '11222333000181',
-    DocumentoProfissionalTipo: 'CNPJ',
-    DocumentoProfissionalMascarado: '**.***.***/****-81',
-  });
-
-  assert.equal(publico.CNPJ, '11222333000181');
-  assert.equal(publico.DocumentoProfissionalTipo, 'CNPJ');
+test('preserva valores não-objeto sem tentar transformá-los', () => {
+  assert.equal(protegerPerfilPublicoDeDocumento(null), null);
+  assert.equal(protegerPerfilPublicoDeDocumento('perfil'), 'perfil');
 });
 
 test('perfil completo seleciona e retorna TipoPessoa, CPF e CNPJ', () => {
@@ -64,10 +58,12 @@ test('Admin recebe PF/PJ e permite busca por CPF normalizado', () => {
   assert.match(service, /@BuscaCpf IS NOT NULL AND f\.CPF LIKE @BuscaCpf/);
 });
 
-test('procedure pública retorna somente CPF mascarado', () => {
-  const migration = readProjectFile('sql/FISIOTERAPEUTAS_PF_PJ_DOCUMENTOS_GLOBAIS_V130.sql');
+test('V131 remove documento e tipo de pessoa da procedure pública', () => {
+  const migration = readProjectFile('sql/FISIOTERAPEUTA_PERFIL_PUBLICO_PRIVACIDADE_V131.sql');
+  const procedureDefinition = migration.split('DECLARE @DefinicaoPerfilPublico')[0];
 
-  assert.match(migration, /AS DocumentoProfissionalMascarado,/);
-  assert.match(migration, /THEN CONCAT\(N''\*\*\*\.\*\*\*\.\*\*\*-''\s*,\s*RIGHT\(f\.CPF, 2\)\)/);
-  assert.doesNotMatch(migration, /f\.CPF\s+AS\s+(?:CPF|Cpf)\b/i);
+  assert.doesNotMatch(procedureDefinition, /\bf\.CPF\b/i);
+  assert.doesNotMatch(procedureDefinition, /\bf\.CNPJ\b/i);
+  assert.doesNotMatch(procedureDefinition, /DocumentoProfissional/i);
+  assert.doesNotMatch(procedureDefinition, /\bf\.TipoPessoa\b/i);
 });

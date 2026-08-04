@@ -8,6 +8,7 @@ import reembolsosGatewayFilaService from './reembolsosGatewayFilaService.js';
 import { HttpError } from '../utils/httpError.js';
 import { log } from '../config/logger.js';
 import { agoraBrasilDate } from '../utils/appDateTime.js';
+import { montarPrestadorCheckout } from '../utils/professionalCheckout.js';
 
 // ---------------- helpers ----------------
 function assertId(v, name = 'id') {
@@ -94,6 +95,9 @@ async function carregarPrecoBaseFisio(fisioterapeutaId, usuario, especialidadeId
           f.Id AS FisioterapeutaId,
           f.TipoConta,
           f.DescontoPacote,
+          f.TipoPessoa,
+          f.CPF,
+          f.CNPJ,
           fe.EspecialidadeId,
           e.Nome AS EspecialidadeNome,
           vcf.ValorPacienteFinal AS ValorConsulta
@@ -113,9 +117,14 @@ async function carregarPrecoBaseFisio(fisioterapeutaId, usuario, especialidadeId
           v.TipoConta,
           v.ValorConsulta,
           v.DescontoPacote,
+          f.TipoPessoa,
+          f.CPF,
+          f.CNPJ,
           esp.EspecialidadeId,
           esp.EspecialidadeNome
         FROM dbo.vw_FisioterapeutaPerfilPublico v
+        JOIN dbo.Fisioterapeutas f
+          ON f.Id = v.FisioterapeutaId
         OUTER APPLY (
           SELECT TOP (1)
             fe.EspecialidadeId,
@@ -146,6 +155,7 @@ async function carregarPrecoBaseFisio(fisioterapeutaId, usuario, especialidadeId
     valorConsulta,
     descontoPacote,
     tipoConta,
+    prestador: montarPrestadorCheckout(row),
     especialidadeId: row.EspecialidadeId ?? espId,
     especialidadeNome: row.EspecialidadeNome ?? null,
   };
@@ -676,7 +686,8 @@ const pacotesService = {
       valorConsulta,
       descontoPacote,
       especialidadeId,
-      especialidadeNome
+      especialidadeNome,
+      prestador
     } = await carregarPrecoBaseFisio(fisioterapeutaId, usuario, especialidadeIdInput);
 
     const descontoAplicado = Math.min(Math.max(Number(descontoPacote || 0), 0), 100);
@@ -725,6 +736,7 @@ const pacotesService = {
     const resumo = resumoResult?.recordset?.[0] ?? {};
 
     return {
+      Prestador: prestador,
       resumoFinanceiro: {
         ValorPacote: Number(resumo.ValorPacote ?? 0) || 0,
         TaxaServico: Number(resumo.TaxaServico ?? 0) || 0,
