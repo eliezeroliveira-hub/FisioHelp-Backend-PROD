@@ -29,6 +29,7 @@ import fileStorageProvider from '../providers/fileStorageProvider.js';
 import { getHeicPreviewRelativePath, isHeicStoragePath } from '../utils/heicPreview.js';
 import { normalizarChavePixTelefoneAsaas } from '../utils/pixKey.js';
 import { agoraAppDate } from '../utils/appDateTime.js';
+import { normalizarDocumentoProfissional } from '../utils/professionalDocument.js';
 
 const APP_TIME_ZONE = 'America/Sao_Paulo';
 const CNPJ_ALFANUMERICO_REPASSE_MSG =
@@ -598,6 +599,14 @@ function mapFisioterapeutaCreateError(err) {
 
   if (num === 2601 || num === 2627 || msg.includes('duplicate key')) {
     if (
+      msg.includes('uq_usuariosdocumentosunicos_documento') ||
+      msg.includes('documentonormalizado')
+    ) {
+      if (msg.includes('cpf')) return new HttpError(409, 'CPF já cadastrado.');
+      if (msg.includes('cnpj')) return new HttpError(409, 'CNPJ já cadastrado.');
+      return new HttpError(409, 'Documento profissional já cadastrado.');
+    }
+    if (
       msg.includes('uq_fisioterapeutas_email') ||
       msg.includes('uq_usuariosemailsunicos_emailnormalizado') ||
       msg.includes('emailnormalizado')
@@ -627,6 +636,14 @@ function mapFisioterapeutaCreateError(err) {
     }
 
     if (msg.includes('duplicate key') || msg.includes('chave única') || msg.includes('unique')) {
+      if (
+        msg.includes('uq_usuariosdocumentosunicos_documento') ||
+        msg.includes('documentonormalizado')
+      ) {
+        if (msg.includes('cpf')) return new HttpError(409, 'CPF já cadastrado.');
+        if (msg.includes('cnpj')) return new HttpError(409, 'CNPJ já cadastrado.');
+        return new HttpError(409, 'Documento profissional já cadastrado.');
+      }
       if (msg.includes('email')) return new HttpError(409, 'E-mail já cadastrado.');
       if (msg.includes('telefone')) return new HttpError(409, 'Telefone já cadastrado.');
       if (msg.includes('crefito')) return new HttpError(409, 'Já existe um fisioterapeuta com esse CREFITO.');
@@ -652,6 +669,10 @@ function mapPreCadastroPacienteError(err) {
     err?.originalError?.message ||
     ''
   ).toLowerCase();
+
+  if (msg.includes('já existe usuário cadastrado com este cpf')) {
+    return new HttpError(409, 'CPF já cadastrado.');
+  }
 
   if (num === 2601 || num === 2627 || msg.includes('duplicate key')) {
     if (
@@ -1492,6 +1513,8 @@ const fisioterapeutasService = {
       Cidade,
       Estado,
       EspecialidadeId,
+      TipoPessoa,
+      CPF,
       CNPJ,
       Senha,
       ValorConsultaBase,
@@ -1500,7 +1523,7 @@ const fisioterapeutasService = {
     } = dados;
     try {
 
-    if (!Nome || !CREFITO || !Email || !Telefone || !Cidade || !Estado || !EspecialidadeId || !CNPJ || !Senha) {
+    if (!Nome || !CREFITO || !Email || !Telefone || !Cidade || !Estado || !EspecialidadeId || !Senha) {
       throw new HttpError(400, 'Campos obrigatórios ausentes.');
     }
     const GENEROS_VALIDOS = ['Masculino', 'Feminino'];
@@ -1527,10 +1550,12 @@ const fisioterapeutasService = {
 
     const crefito = normalizarCrefito(CREFITO);
     const uf = Estado.toUpperCase().trim();
-    const cnpj = normalizeCNPJ(CNPJ);
+    const documentoProfissional = normalizarDocumentoProfissional({ TipoPessoa, CPF, CNPJ });
+    const tipoPessoa = documentoProfissional.TipoPessoa;
+    const cpf = documentoProfissional.CPF;
+    const cnpj = documentoProfissional.CNPJ;
 
     if (!/^[A-Z]{2}$/.test(uf)) throw new HttpError(400, 'Estado inválido. Use sigla UF, ex.: SP.');
-    if (!isValidCNPJ(cnpj)) throw new HttpError(400, 'CNPJ inválido.');
 
     // Especialidade via ID (somente opções disponíveis)
     const esp = await queryWithContext(
@@ -1588,17 +1613,32 @@ const fisioterapeutasService = {
       throw new HttpError(409, 'Telefone já cadastrado.');
     }
 
+    const dupDocumentoGlobal = await queryWithContext(
+      null,
+      (req) => {
+        req.input('DocumentoTipo', sql.NVarChar(4), documentoProfissional.DocumentoTipo);
+        req.input('DocumentoNormalizado', sql.NVarChar(32), documentoProfissional.DocumentoNormalizado);
+      },
+      `
+        SELECT TOP 1 UsuarioTipo, UsuarioId
+        FROM dbo.UsuariosDocumentosUnicos
+        WHERE DocumentoTipo = @DocumentoTipo
+          AND DocumentoNormalizado = @DocumentoNormalizado;
+      `
+    );
+
+    if (dupDocumentoGlobal.recordset?.length) {
+      throw new HttpError(409, `${documentoProfissional.DocumentoTipo} já cadastrado.`);
+    }
+
     // Unicidade
     const dupCheck = await queryWithContext(
       null,
       (req) => {
         req.input('CREFITO', sql.NVarChar(20), crefito);
-        req.input('CNPJ', sql.NVarChar(20), cnpj);
       },
       `
         SELECT TOP 1 'CREFITO' AS Campo FROM dbo.Fisioterapeutas WHERE CREFITO = @CREFITO
-        UNION ALL
-        SELECT TOP 1 'CNPJ'           FROM dbo.Fisioterapeutas WHERE CNPJ = @CNPJ
       `
     );
 
@@ -1630,7 +1670,9 @@ const fisioterapeutasService = {
         req.input('Cidade', sql.NVarChar(150), Cidade);
         req.input('Estado', sql.Char(2), uf);
         req.input('Especialidade', sql.NVarChar(200), especialidadeNome);
-        req.input('CNPJ', sql.NVarChar(20), cnpj);
+        req.input('TipoPessoa', sql.VarChar(2), tipoPessoa);
+        req.input('CPF', sql.NVarChar(40), cpf);
+        req.input('CNPJ', sql.VarChar(14), cnpj);
         req.input('SenhaHash', sql.NVarChar(255), senhaHash);
         req.input('Tolerancia', sql.Int, tolerancia);
         req.input('ValorConsultaBase', sql.Decimal(10, 2), Number(valorConsulta));
@@ -1718,7 +1760,7 @@ const fisioterapeutasService = {
 
           INSERT INTO dbo.Fisioterapeutas (
             Nome, CREFITO, Email, Telefone, Cidade, Estado,
-            Especialidade, CNPJ, SenhaHash,
+            Especialidade, TipoPessoa, CPF, CNPJ, SenhaHash,
             ToleranciaCancelamentoMinutos,
             ValorConsultaBase, ConfirmacaoAutomatica,
             TipoConta, DescontoPacote,
@@ -1729,7 +1771,7 @@ const fisioterapeutasService = {
           OUTPUT INSERTED.Id INTO @NovoId(Id)
           VALUES (
             @Nome, @CREFITO, @Email, @Telefone, @Cidade, @Estado,
-            @Especialidade, @CNPJ, @SenhaHash,
+            @Especialidade, @TipoPessoa, @CPF, @CNPJ, @SenhaHash,
             @Tolerancia,
             @ValorConsultaBase, @ConfirmacaoAutomatica,
             @TipoConta, @DescontoPacote,
@@ -1809,6 +1851,7 @@ const fisioterapeutasService = {
             Email,
             Telefone,
             Especialidade,
+            TipoPessoa,
             Cidade,
             Estado,
             ValorConsultaBase,
@@ -1831,6 +1874,7 @@ const fisioterapeutasService = {
           Email: emailNorm,
           Telefone: telefoneNorm,
           Especialidade: especialidadeNome,
+          TipoPessoa: tipoPessoa,
           Cidade,
           Estado: uf,
           ValorConsultaBase: Number(valorConsulta),
@@ -1840,6 +1884,8 @@ const fisioterapeutasService = {
         };
       }
     }
+
+    fisio.TipoPessoa = fisio.TipoPessoa ?? tipoPessoa;
 
     if (novoId) {
       fisio.verificacaoEmailEnviada = false;

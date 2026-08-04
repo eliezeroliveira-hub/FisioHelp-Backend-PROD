@@ -81,8 +81,9 @@ const cadastroController = {
             request.input('CPF', sql.NVarChar(40), cpf);
           },
           `SELECT TOP 1 1 AS Encontrado
-           FROM dbo.Pacientes
-           WHERE CPF = @CPF`
+           FROM dbo.UsuariosDocumentosUnicos
+           WHERE DocumentoTipo = N'CPF'
+             AND DocumentoNormalizado = @CPF`
         );
 
         const encontrado = result.recordset?.length > 0;
@@ -127,8 +128,9 @@ const cadastroController = {
             request.input('CNPJ', sql.NVarChar(20), cnpj);
           },
           `SELECT TOP 1 1 AS Encontrado
-           FROM dbo.Fisioterapeutas
-           WHERE CNPJ = @CNPJ`
+           FROM dbo.UsuariosDocumentosUnicos
+           WHERE DocumentoTipo = N'CNPJ'
+             AND DocumentoNormalizado = @CNPJ`
         );
 
         const encontrado = result.recordset?.length > 0;

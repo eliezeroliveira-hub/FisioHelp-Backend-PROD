@@ -85,6 +85,7 @@ function filtrarRetorno(f) {
     Especialidade: f.Especialidade,
     Cidade: f.Cidade,
     Estado: f.Estado,
+    TipoPessoa: f.TipoPessoa ?? null,
     ValorConsultaBase: f.ValorConsultaBase,
     TipoConta: f.TipoConta,
     Ativo: f.Ativo,
