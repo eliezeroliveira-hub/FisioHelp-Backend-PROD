@@ -5,13 +5,9 @@ import { log } from '../config/logger.js';
 import { authService } from '../services/authService.js';
 import { validarGoogleToken, validarAppleToken } from '../services/oauthService.js';
 import redefinicaoSenhaService from '../services/redefinicaoSenhaService.js';
-import { isValidCNPJ, normalizeCNPJ } from '../utils/identityValidators.js';
+import { buildAuthLoginPayload } from '../utils/authLoginPayload.js';
 
 /* ------------------------------ helpers ------------------------------ */
-
-function normalizeDigits(v) {
-  return String(v || '').replace(/\D/g, '');
-}
 
 function statusFromAuthMessage(msg, fallback = 500) {
   const m = String(msg || '').trim();
@@ -139,18 +135,7 @@ const authController = {
     }
 
     try {
-      const identificador = String(identificadorRaw).trim();
-      const digits = normalizeDigits(identificador);
-      const cnpjNorm = normalizeCNPJ(identificador);
-
-      const isCPF = digits.length === 11;
-      const isCNPJ = isValidCNPJ(cnpjNorm);
-
-      const payload = { senha: String(senha) };
-
-      if (isCPF) payload.cpf = digits;
-      else if (isCNPJ) payload.cnpj = cnpjNorm;
-      else payload.email = identificador;
+      const payload = buildAuthLoginPayload({ email, cpf, cnpj, login, senha });
 
       const data = await authService.login(payload, req);
 

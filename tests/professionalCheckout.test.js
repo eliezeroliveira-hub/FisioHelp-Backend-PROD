@@ -52,11 +52,13 @@ test('não devolve detalhes do dado inconsistente na mensagem de erro', () => {
 test('somente os pré-checkouts autenticados incluem Prestador', () => {
   const consultas = readProjectFile('services/consultasService.js');
   const pacotes = readProjectFile('services/pacotesService.js');
+  const pacotesController = readProjectFile('controllers/pacotesController.js');
   const routesConsultas = readProjectFile('routes/consultas.js');
   const routesPacotes = readProjectFile('routes/pacotes.js');
 
   assert.match(consultas, /Prestador:\s*prestador,/);
   assert.match(pacotes, /Prestador:\s*prestador,/);
+  assert.match(pacotesController, /Prestador:\s*resultado\?\.Prestador\s*\?\?\s*null,/);
   assert.match(routesConsultas, /pre-agendamento\/opcoes-pagamento'[\s\S]*?verificarPermissao\(\['Paciente'\]\)/);
   assert.match(routesPacotes, /pre-compra\/resumo'[\s\S]*?verificarPermissao\(\['Paciente'\]\)/);
 });

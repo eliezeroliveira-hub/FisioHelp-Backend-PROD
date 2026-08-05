@@ -31,6 +31,7 @@ const pacotesController = {
 
       return res.json({
         sucesso: true,
+        Prestador: resultado?.Prestador ?? null,
         resumoFinanceiro: resultado?.resumoFinanceiro ?? null,
         precificacao: resultado?.precificacao ?? null,
       });
