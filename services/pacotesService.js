@@ -9,6 +9,7 @@ import { HttpError } from '../utils/httpError.js';
 import { log } from '../config/logger.js';
 import { agoraBrasilDate } from '../utils/appDateTime.js';
 import { montarPrestadorCheckout } from '../utils/professionalCheckout.js';
+import { validarJurisdicaoAtendimentoAtual } from '../utils/jurisdiction.js';
 
 // ---------------- helpers ----------------
 function assertId(v, name = 'id') {
@@ -27,6 +28,31 @@ function isPaciente(usuario) {
 
 function isAdmin(usuario) {
   return String(usuario?.tipo || '').toLowerCase() === 'admin';
+}
+
+async function validarJurisdicaoCompraPacote({ pacienteId, fisioterapeutaId, usuario }) {
+  const result = await queryWithContext(usuario, (req) => {
+    req.input('PacienteId', sql.Int, pacienteId);
+    req.input('FisioterapeutaId', sql.Int, fisioterapeutaId);
+  }, `
+    SELECT TOP (1)
+      p.Estado AS PacienteEstado,
+      f.Estado AS FisioterapeutaEstado,
+      f.CrefitoVerificado
+    FROM dbo.Pacientes p
+    CROSS JOIN dbo.Fisioterapeutas f
+    WHERE p.Id = @PacienteId
+      AND f.Id = @FisioterapeutaId;
+  `);
+
+  const row = result?.recordset?.[0] ?? null;
+  if (!row) throw new HttpError(404, 'Paciente ou Fisioterapeuta não encontrado.');
+
+  return validarJurisdicaoAtendimentoAtual({
+    pacienteEstado: row.PacienteEstado,
+    fisioterapeutaEstado: row.FisioterapeutaEstado,
+    crefitoVerificado: row.CrefitoVerificado,
+  });
 }
 
 function normalizeText(v, max = 200) {
@@ -675,9 +701,14 @@ const pacotesService = {
       throw new HttpError(403, 'Somente Paciente (ou Admin) pode consultar a prévia do pacote.');
     }
 
+    const pacienteId = isPaciente(usuario)
+      ? assertId(usuario.id, 'PacienteId')
+      : assertId(dados?.PacienteId ?? dados?.pacienteId, 'PacienteId');
     const fisioterapeutaId = assertId(dados?.FisioterapeutaId ?? dados?.fisioterapeutaId, 'FisioterapeutaId');
     const especialidadeIdInput = dados?.EspecialidadeId ?? dados?.especialidadeId ?? null;
     const quantidade = assertId(dados?.QuantidadeConsultas ?? dados?.quantidadeConsultas, 'QuantidadeConsultas');
+
+    await validarJurisdicaoCompraPacote({ pacienteId, fisioterapeutaId, usuario });
 
     if (quantidade < 2) throw new HttpError(400, 'O pacote deve ter no mínimo 2 consultas.');
     if (quantidade > 100) throw new HttpError(400, 'QuantidadeConsultas muito alta (limite: 100).');
@@ -781,6 +812,8 @@ const pacotesService = {
 
     const fisioterapeutaId = assertId(dados?.FisioterapeutaId ?? dados?.fisioterapeutaId, 'FisioterapeutaId');
     const especialidadeIdInput = dados?.EspecialidadeId ?? dados?.especialidadeId ?? null;
+
+    await validarJurisdicaoCompraPacote({ pacienteId, fisioterapeutaId, usuario });
 
     const quantidade = assertId(dados?.QuantidadeConsultas ?? dados?.quantidadeConsultas, 'QuantidadeConsultas');
     if (quantidade < 2) throw new HttpError(400, 'O pacote deve ter no mínimo 2 consultas.');

@@ -3,6 +3,10 @@ import { sql } from '../config/dbConfig.js';
 import { queryWithContext } from './_queryWithContext.js';
 import { HttpError } from '../utils/httpError.js';
 import { agoraBrasilDate } from '../utils/appDateTime.js';
+import {
+  ESTADO_CREFITO_IMUTAVEL_MESSAGE,
+  normalizeUf,
+} from '../utils/jurisdiction.js';
 
 function asFiniteNumber(v, label) {
   const n = typeof v === 'string' ? Number(v.replace(',', '.')) : Number(v);
@@ -48,6 +52,10 @@ const localizacoesService = {
     }
 
     const raio = assertRaioKm(raioAtendimentoKm, 'raioAtendimentoKm');
+    const estadoNormalizado = estado == null ? null : normalizeUf(estado);
+    if (estado != null && !estadoNormalizado) {
+      throw new HttpError(400, 'Estado inválido. Informe uma UF com 2 letras.');
+    }
     const contexto = { id: usuarioId, tipo: usuarioTipo };
 
     const sqlText = `
@@ -55,6 +63,23 @@ const localizacoesService = {
 
       BEGIN TRY
         BEGIN TRAN;
+
+        DECLARE @EstadoAtual CHAR(2);
+        DECLARE @CrefitoVerificadoAtual BIT;
+
+        SELECT
+          @EstadoAtual = Estado,
+          @CrefitoVerificadoAtual = CrefitoVerificado
+        FROM dbo.Fisioterapeutas WITH (UPDLOCK, HOLDLOCK)
+        WHERE Id = @FisioterapeutaId;
+
+        IF ISNULL(@CrefitoVerificadoAtual, 0) = 1
+           AND ISNULL(UPPER(LTRIM(RTRIM(@EstadoAtual))), N'') <> ISNULL(@Estado, N'')
+        BEGIN
+          ROLLBACK;
+          SELECT CAST(1 AS BIT) AS EstadoCrefitoBloqueado;
+          RETURN;
+        END;
 
         UPDATE dbo.Localizacoes WITH (UPDLOCK, HOLDLOCK)
           SET
@@ -104,7 +129,8 @@ const localizacoesService = {
           CEP,
           Logradouro,
           Numero,
-          AtualizadoEm
+          AtualizadoEm,
+          CAST(0 AS BIT) AS EstadoCrefitoBloqueado
         FROM dbo.Localizacoes
         WHERE FisioterapeutaId = @FisioterapeutaId;
 
@@ -124,7 +150,7 @@ const localizacoesService = {
         req.input('Lon', sql.Decimal(9, 6), lon);
         req.input('Raio', sql.Decimal(5, 2), raio);
         req.input('Cidade', sql.NVarChar(200), cidade ?? null);
-        req.input('Estado', sql.NVarChar(200), estado ?? null);
+        req.input('Estado', sql.NVarChar(200), estadoNormalizado);
         req.input('Cep', sql.NVarChar(9), cep ?? null);
         req.input('Logradouro', sql.NVarChar(400), logradouro ?? null);
         req.input('Numero', sql.NVarChar(20), numero ?? null);
@@ -134,7 +160,12 @@ const localizacoesService = {
       { requireContext: true }
     );
 
-    return result?.recordset?.[0] ?? null;
+    const row = result?.recordset?.[0] ?? null;
+    if (Number(row?.EstadoCrefitoBloqueado ?? 0) === 1) {
+      throw new HttpError(409, ESTADO_CREFITO_IMUTAVEL_MESSAGE);
+    }
+    if (row) delete row.EstadoCrefitoBloqueado;
+    return row;
   },
 
   async obterMinhaLocalizacao({ usuarioTipo, usuarioId }) {

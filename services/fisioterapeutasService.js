@@ -35,6 +35,10 @@ import {
   resolverTitularFinanceiro,
   validarChavePixDocumentalDoTitular,
 } from '../utils/professionalFinancial.js';
+import {
+  ESTADO_CREFITO_IMUTAVEL_MESSAGE,
+  normalizeUf,
+} from '../utils/jurisdiction.js';
 
 const APP_TIME_ZONE = 'America/Sao_Paulo';
 
@@ -2070,6 +2074,12 @@ const fisioterapeutasService = {
       dados.Genero = genero;
     }
 
+    if (dados?.Estado !== undefined) {
+      const estado = normalizeUf(dados.Estado);
+      if (!estado) throw new HttpError(400, 'Estado inválido. Informe uma UF com 2 letras.');
+      dados.Estado = estado;
+    }
+
     for (const campo of camposPermitidos) {
       if (dados?.[campo] !== undefined) {
         updateFields.push(`${campo} = @${campo}`);
@@ -2196,7 +2206,26 @@ const fisioterapeutasService = {
         WHERE FisioterapeutaId = @Id AND Principal = 1;
     ` : '';
 
-    await queryWithContext(ctx, (req) => {
+    const protegerEstadoCrefitoSql = prepared.Estado !== undefined ? `
+      DECLARE @EstadoAtual CHAR(2);
+      DECLARE @CrefitoVerificadoAtual BIT;
+
+      SELECT
+        @EstadoAtual = Estado,
+        @CrefitoVerificadoAtual = CrefitoVerificado
+      FROM dbo.Fisioterapeutas WITH (UPDLOCK, HOLDLOCK)
+      WHERE Id = @Id;
+
+      IF ISNULL(@CrefitoVerificadoAtual, 0) = 1
+         AND ISNULL(UPPER(LTRIM(RTRIM(@EstadoAtual))), N'') <> @Estado
+      BEGIN
+        ROLLBACK;
+        SELECT CAST(1 AS BIT) AS EstadoCrefitoBloqueado;
+        RETURN;
+      END;
+    ` : '';
+
+    const updateResult = await queryWithContext(ctx, (req) => {
       req.input('Id', sql.Int, id);
 
       for (const [k, v] of Object.entries(prepared)) {
@@ -2207,6 +2236,8 @@ const fisioterapeutasService = {
       SET XACT_ABORT ON;
       BEGIN TRY
         BEGIN TRAN;
+
+        ${protegerEstadoCrefitoSql}
 
         UPDATE dbo.Fisioterapeutas
         SET ${updateFields.join(', ')}
@@ -2228,6 +2259,10 @@ const fisioterapeutasService = {
       BEGIN CATCH
       END CATCH;
     `);
+
+    if (Number(updateResult?.recordset?.[0]?.EstadoCrefitoBloqueado ?? 0) === 1) {
+      throw new HttpError(409, ESTADO_CREFITO_IMUTAVEL_MESSAGE);
+    }
 
     return await this.buscarPerfilCompleto(id, ctx);
   },

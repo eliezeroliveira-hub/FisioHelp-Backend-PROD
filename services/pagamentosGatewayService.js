@@ -8,6 +8,7 @@ import { asaasClient } from './asaasClient.js';
 import notificacoesDispatch from './notificacoesDispatch.js';
 import { isValidCPF, isValidEmail } from '../utils/identityValidators.js';
 import { agoraBrasilDate, formatBrasilDateTimeLocalIso } from '../utils/appDateTime.js';
+import { validarJurisdicaoAtendimentoAtual } from '../utils/jurisdiction.js';
 
 const ASAAS_PACOTE_MAX_PARCELAS = 10;
 
@@ -651,8 +652,11 @@ const pagamentosGatewayService = {
         p.ValorTotal,
         p.Status,
         f.Nome AS NomeFisioterapeuta,
+        f.Estado AS FisioterapeutaEstado,
+        f.CrefitoVerificado,
         e.Nome AS EspecialidadeNome,
         pa.Nome AS PacienteNome,
+        pa.Estado AS PacienteEstado,
         pa.CPF AS PacienteCpfCnpj,
         pa.Email AS PacienteEmail,
         pa.Telefone AS PacienteTelefone,
@@ -673,6 +677,12 @@ const pagamentosGatewayService = {
     if (!row || !valor || valor <= 0) {
       throw new HttpError(400, 'Pacote pendente não encontrado ou valor inválido.');
     }
+
+    validarJurisdicaoAtendimentoAtual({
+      pacienteEstado: row.PacienteEstado,
+      fisioterapeutaEstado: row.FisioterapeutaEstado,
+      crefitoVerificado: row.CrefitoVerificado,
+    });
 
     const customerData = buildAsaasCustomerData(row);
     const checkoutParcelado = tipoCobranca === 'CREDIT_CARD';
