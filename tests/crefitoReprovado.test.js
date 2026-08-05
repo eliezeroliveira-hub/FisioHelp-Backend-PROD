@@ -83,8 +83,17 @@ test('template de e-mail inclui motivo completo, instrução e rodapé padrão',
   assert.match(email.corpoHtml, /Olá, Maria/);
   assert.match(email.corpoHtml, /Documento cortado &lt;reenvie&gt; &amp; confirme./);
   assert.doesNotMatch(email.corpoHtml, /Documento cortado <reenvie>/);
-  assert.match(email.corpoHtml, /faça um novo envio para análise/);
+  assert.match(email.corpoHtml, /encaminhe para o e-mail suporte@fisiohelp\.com\.br/);
+  assert.match(email.corpoHtml, /número correto e completo do seu registro profissional/);
+  assert.match(email.corpoHtml, /emitida pelo CREFITO-2/);
+  assert.match(email.corpoHtml, /Caso o registro seja de outro Conselho Regional/);
+  assert.match(email.corpoHtml, /Assim que recebermos as informações atualizadas/);
+  assert.match(email.corpoHtml, /Atenciosamente,<br>Equipe FisioHelp/);
+  assert.doesNotMatch(email.corpoHtml, /faça um novo envio para análise/);
   assert.match(email.corpoTexto, /Documento cortado <reenvie> & confirme./);
+  assert.match(email.corpoTexto, /suporte@fisiohelp\.com\.br/);
+  assert.match(email.corpoTexto, /- O número correto e completo/);
+  assert.match(email.corpoTexto, /Atenciosamente,\nEquipe FisioHelp/);
   assert.match(email.corpoTexto, /Mensagem automática — esta caixa não é monitorada/);
 });
 
