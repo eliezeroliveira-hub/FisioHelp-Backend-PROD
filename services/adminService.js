@@ -481,6 +481,8 @@ const adminService = {
           p.Nome,
           p.Email,
           p.Telefone,
+          p.Cidade,
+          p.Estado,
           ISNULL(p.Ativo, 0)       AS Ativo,
           ISNULL(p.IsBloqueado, 0) AS Bloqueado,
           p.DataCadastro           AS CriadoEm,
@@ -491,7 +493,9 @@ const adminService = {
             p.Nome     LIKE @Busca OR
             p.Email    LIKE @Busca OR
             p.Telefone LIKE @Busca OR
-            p.CPF      LIKE @Busca
+            p.CPF      LIKE @Busca OR
+            p.Cidade   LIKE @Busca OR
+            p.Estado   LIKE @Busca
           ))
           AND (@Status IS NULL
             OR (@Status = 'ativo'     AND ISNULL(p.Ativo, 0) = 1 AND ISNULL(p.IsBloqueado, 0) = 0)
