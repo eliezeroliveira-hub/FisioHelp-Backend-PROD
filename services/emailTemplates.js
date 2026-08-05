@@ -460,7 +460,7 @@ function montarEmailCrefitoReprovado(dados = {}) {
     ${paragrafoHtml('Verifique os dados enviados e encaminhe para o e-mail suporte@fisiohelp.com.br:')}
     <ul style="margin:0 0 16px 20px;padding:0;color:#5F4B40;font-size:15px;line-height:1.65;">
       <li style="margin:0 0 8px 0;">O número correto e completo do seu registro profissional; ou</li>
-      <li style="margin:0;">Uma carteira, certidão ou declaração atualizada emitida pelo CREFITO-2 que comprove que o registro está ativo e regular.</li>
+      <li style="margin:0;">Uma carteira, certidão ou declaração atualizada emitida pelo CREFITO que comprove que o registro está ativo e regular.</li>
     </ul>
     ${paragrafoHtml('Caso o registro seja de outro Conselho Regional, informe também o CREFITO responsável.')}
     ${paragrafoHtml('Assim que recebermos as informações atualizadas, faremos uma nova validação.')}
@@ -478,7 +478,7 @@ ${motivo}
 Verifique os dados enviados e encaminhe para o e-mail suporte@fisiohelp.com.br:
 
 - O número correto e completo do seu registro profissional; ou
-- Uma carteira, certidão ou declaração atualizada emitida pelo CREFITO-2 que comprove que o registro está ativo e regular.
+- Uma carteira, certidão ou declaração atualizada emitida pelo CREFITO que comprove que o registro está ativo e regular.
 
 Caso o registro seja de outro Conselho Regional, informe também o CREFITO responsável.
 

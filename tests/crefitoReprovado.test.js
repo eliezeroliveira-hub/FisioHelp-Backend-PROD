@@ -85,7 +85,8 @@ test('template de e-mail inclui motivo completo, instrução e rodapé padrão',
   assert.doesNotMatch(email.corpoHtml, /Documento cortado <reenvie>/);
   assert.match(email.corpoHtml, /encaminhe para o e-mail suporte@fisiohelp\.com\.br/);
   assert.match(email.corpoHtml, /número correto e completo do seu registro profissional/);
-  assert.match(email.corpoHtml, /emitida pelo CREFITO-2/);
+  assert.match(email.corpoHtml, /emitida pelo CREFITO que/);
+  assert.doesNotMatch(email.corpoHtml, /CREFITO-\d+/);
   assert.match(email.corpoHtml, /Caso o registro seja de outro Conselho Regional/);
   assert.match(email.corpoHtml, /Assim que recebermos as informações atualizadas/);
   assert.match(email.corpoHtml, /Atenciosamente,<br>Equipe FisioHelp/);
