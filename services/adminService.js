@@ -7,12 +7,19 @@ import { HttpError } from '../utils/httpError.js';
 import { normalizeCNPJ } from '../utils/identityValidators.js';
 import fileStorageProvider from '../providers/fileStorageProvider.js';
 import { agoraAppDate } from '../utils/appDateTime.js';
+import { log } from '../config/logger.js';
+import { ROTINA_PADRAO_AUTO, rotinaPadraoHoraSql } from '../config/agendaDefaults.js';
 
 const YOUTUBE_RE = /^https?:\/\/(www\.)?(youtube\.com\/(watch\?v=|embed\/|shorts\/)|youtu\.be\/).+/i;
 const STATUS_DOCUMENTO_VALIDOS = new Set(['Aprovado', 'Reprovado', 'Pendente']);
 const ENTIDADES_AUDITORIA_VALIDAS = new Set(['Fisioterapeuta', 'Paciente']);
 const ACOES_AUDITORIA_VALIDAS = new Set(['Bloquear', 'Desbloquear', 'Ativar', 'Desativar']);
 const CAMPOS_ESTADO_VALIDOS = new Set(['Ativo', 'IsBloqueado']);
+const ROTINA_PADRAO_APROVACAO_VALUES_SQL = ROTINA_PADRAO_AUTO.diasSemana
+  .map((diaSemana) => (
+    `(@FisioId, ${diaSemana}, @HoraInicioPadrao, @HoraFimPadrao, @AtivoPadrao, @NotasPadrao)`
+  ))
+  .join(',\n                ');
 
 function pad2(n) {
   return String(n).padStart(2, '0');
@@ -1222,15 +1229,23 @@ const adminService = {
       throw new HttpError(400, 'Motivo de reprovação é obrigatório para CREFITO.');
 
     if (status === 'Aprovado') {
-      await queryWithContext(
+      const aprovacaoResult = await queryWithContext(
         usuario,
         (request) => request
           .input('Id', sql.Int, documento.Id)
           .input('Status', sql.NVarChar(20), 'Aprovado')
           .input('ValidadorId', sql.Int, adminId)
           .input('FisioId', sql.Int, fisioId)
-          .input('AgoraBrasil', sql.DateTime2(7), agoraBrasil),
+          .input('AgoraBrasil', sql.DateTime2(7), agoraBrasil)
+          .input('HoraInicioPadrao', sql.Time, rotinaPadraoHoraSql(ROTINA_PADRAO_AUTO.horaInicio))
+          .input('HoraFimPadrao', sql.Time, rotinaPadraoHoraSql(ROTINA_PADRAO_AUTO.horaFim))
+          .input('AtivoPadrao', sql.Bit, ROTINA_PADRAO_AUTO.ativo)
+          .input('NotasPadrao', sql.NVarChar(500), ROTINA_PADRAO_AUTO.notas)
+          .input('QuantidadeAgendaEsperada', sql.Int, ROTINA_PADRAO_AUTO.diasSemana.length),
         `
+          SET NOCOUNT ON;
+          DECLARE @AgendasCriadas INT = 0;
+
           BEGIN TRY
             BEGIN TRAN;
 
@@ -1255,7 +1270,26 @@ const adminService = {
             IF @@ROWCOUNT = 0
               THROW 50002, 'Fisioterapeuta não encontrado.', 1;
 
+            IF NOT EXISTS (
+              SELECT 1
+              FROM dbo.AgendasFisioterapeutas WITH (UPDLOCK, HOLDLOCK)
+              WHERE FisioterapeutaId = @FisioId
+            )
+            BEGIN
+              INSERT INTO dbo.AgendasFisioterapeutas
+                (FisioterapeutaId, DiaSemana, HoraInicio, HoraFim, Ativo, Notas)
+              VALUES
+                ${ROTINA_PADRAO_APROVACAO_VALUES_SQL};
+
+              SET @AgendasCriadas = @@ROWCOUNT;
+
+              IF @AgendasCriadas <> @QuantidadeAgendaEsperada
+                THROW 50003, 'Não foi possível criar a rotina padrão completa.', 1;
+            END
+
             COMMIT;
+
+            SELECT @AgendasCriadas AS AgendasCriadas;
           END TRY
           BEGIN CATCH
             IF @@TRANCOUNT > 0 ROLLBACK;
@@ -1263,6 +1297,14 @@ const adminService = {
           END CATCH
         `
       );
+
+      const agendasCriadas = Number(aprovacaoResult.recordset?.[0]?.AgendasCriadas ?? 0);
+      log('info', 'Rotina padrão garantida após aprovação do CREFITO.', {
+        fisioterapeutaId: fisioId,
+        documentoId: documento.Id,
+        agendasCriadas,
+        agendaJaExistia: agendasCriadas === 0,
+      });
 
       // Melhor esforço: indicação não pode bloquear aprovação de CREFITO.
       let mensagemIndicacao = 'Indicação aprovada (quando existente).';

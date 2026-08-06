@@ -3,6 +3,7 @@ import { sql } from '../config/dbConfig.js';
 import { queryWithContext } from './_queryWithContext.js';
 import { HttpError } from '../utils/httpError.js';
 import { agoraBrasilDate, getAppTimeZoneParts } from '../utils/appDateTime.js';
+import { ROTINA_PADRAO_AUTO, rotinaPadraoHoraSql } from '../config/agendaDefaults.js';
 
 const NOTAS_MAX_LENGTH = 500;
 const MOTIVO_MAX_LENGTH = 500;
@@ -659,22 +660,19 @@ async function assertConsultasCompativeisComDisponibilidadeDia(usuario, fisioter
 }
 
 
-// 🟩 Rotina padrão (auto): evita fisio ter que “criar rotina” para conseguir receber agendamentos.
-// Ajuste aqui se quiser outro horário padrão.
-const ROTINA_PADRAO_AUTO = {
-  horaInicio: '08:00',
-  horaFim: '18:00',
-  ativo: 1,
-  notas: null
-};
+const ROTINA_PADRAO_VALUES_SQL = ROTINA_PADRAO_AUTO.diasSemana
+  .map((diaSemana) => (
+    `(@FisioterapeutaId, ${diaSemana}, @HoraInicioPadrao, @HoraFimPadrao, @AtivoPadrao, @NotasPadrao)`
+  ))
+  .join(',\n            ');
 
 async function ensureRotinaPadraoSeVazia(usuario, fisioterapeutaId) {
-  // Cria 1 intervalo por dia (0..6) se o fisio ainda não tem nenhum registro de rotina.
+  // Cria 1 intervalo por dia (1..5, segunda a sexta) se o fisio ainda não tem rotina.
   // Usa transação explícita + UPDLOCK/HOLDLOCK para evitar duplicar em chamadas concorrentes.
   await queryWithContext(usuario, (req) => {
     req.input('FisioterapeutaId', sql.Int, fisioterapeutaId);
-    req.input('HoraInicioPadrao', sql.Time, assertTimeStr(ROTINA_PADRAO_AUTO.horaInicio, 'HoraInicio padrão'));
-    req.input('HoraFimPadrao', sql.Time, assertTimeStr(ROTINA_PADRAO_AUTO.horaFim, 'HoraFim padrão'));
+    req.input('HoraInicioPadrao', sql.Time, rotinaPadraoHoraSql(ROTINA_PADRAO_AUTO.horaInicio));
+    req.input('HoraFimPadrao', sql.Time, rotinaPadraoHoraSql(ROTINA_PADRAO_AUTO.horaFim));
     req.input('AtivoPadrao', sql.Bit, toBit(ROTINA_PADRAO_AUTO.ativo));
     req.input('NotasPadrao', sql.NVarChar(NOTAS_MAX_LENGTH), sanitizeNotas(ROTINA_PADRAO_AUTO.notas));
   }, `
@@ -691,11 +689,7 @@ async function ensureRotinaPadraoSeVazia(usuario, fisioterapeutaId) {
         BEGIN
           INSERT INTO dbo.AgendasFisioterapeutas (FisioterapeutaId, DiaSemana, HoraInicio, HoraFim, Ativo, Notas)
           VALUES
-            (@FisioterapeutaId, 1, @HoraInicioPadrao, @HoraFimPadrao, @AtivoPadrao, @NotasPadrao),
-            (@FisioterapeutaId, 2, @HoraInicioPadrao, @HoraFimPadrao, @AtivoPadrao, @NotasPadrao),
-            (@FisioterapeutaId, 3, @HoraInicioPadrao, @HoraFimPadrao, @AtivoPadrao, @NotasPadrao),
-            (@FisioterapeutaId, 4, @HoraInicioPadrao, @HoraFimPadrao, @AtivoPadrao, @NotasPadrao),
-            (@FisioterapeutaId, 5, @HoraInicioPadrao, @HoraFimPadrao, @AtivoPadrao, @NotasPadrao);
+            ${ROTINA_PADRAO_VALUES_SQL};
         END
       END
 
@@ -736,8 +730,8 @@ async function criarNotaRotina(usuario, fisioterapeutaId, payload = {}) {
     req.input('FisioterapeutaId', sql.Int, fisioterapeutaId);
     req.input('DiaSemana', sql.TinyInt, d);
     req.input('Notas', sql.NVarChar(NOTAS_MAX_LENGTH), texto);
-    req.input('HoraInicioPadrao', sql.Time, assertTimeStr(ROTINA_PADRAO_AUTO.horaInicio, 'HoraInicio padrão'));
-    req.input('HoraFimPadrao', sql.Time, assertTimeStr(ROTINA_PADRAO_AUTO.horaFim, 'HoraFim padrão'));
+    req.input('HoraInicioPadrao', sql.Time, rotinaPadraoHoraSql(ROTINA_PADRAO_AUTO.horaInicio));
+    req.input('HoraFimPadrao', sql.Time, rotinaPadraoHoraSql(ROTINA_PADRAO_AUTO.horaFim));
     req.input('AtivoNotaPadrao', sql.Bit, 0);
   }, `
     IF NOT EXISTS (
