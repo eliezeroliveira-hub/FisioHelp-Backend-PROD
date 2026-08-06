@@ -1737,7 +1737,7 @@ const fisioterapeutasService = {
             @TipoConta, @DescontoPacote,
             @Ativo, @IsBloqueado, @CrefitoVerificado,
             @Genero,
-            SYSDATETIME()
+            @AgoraBrasil
           );
 
           DECLARE @FisioId INT = (SELECT TOP 1 Id FROM @NovoId);
