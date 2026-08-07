@@ -74,10 +74,6 @@ BEGIN
 
   IF @Nome IS NULL
   BEGIN
-    SELECT
-      N''NaoElegivel'' AS Acao,
-      CAST(NULL AS INT) AS FilaId,
-      @FisioterapeutaId AS FisioterapeutaId;
     RETURN;
   END;
 
@@ -86,10 +82,6 @@ BEGIN
      OR @CrefitoVerificado <> 1
      OR @EmailVerificado <> 1
   BEGIN
-    SELECT
-      N''NaoElegivel'' AS Acao,
-      CAST(NULL AS INT) AS FilaId,
-      @FisioterapeutaId AS FisioterapeutaId;
     RETURN;
   END;
 
@@ -104,10 +96,6 @@ BEGIN
 
   IF @FilaId IS NOT NULL
   BEGIN
-    SELECT
-      N''JaEnviada'' AS Acao,
-      @FilaId AS FilaId,
-      @FisioterapeutaId AS FisioterapeutaId;
     RETURN;
   END;
 
@@ -124,10 +112,6 @@ BEGIN
 
   IF @FilaId IS NOT NULL
   BEGIN
-    SELECT
-      N''JaPendente'' AS Acao,
-      @FilaId AS FilaId,
-      @FisioterapeutaId AS FisioterapeutaId;
     RETURN;
   END;
 
@@ -160,10 +144,6 @@ BEGIN
 
   IF @FilaId IS NOT NULL
   BEGIN
-    SELECT
-      N''Reenfileirada'' AS Acao,
-      @FilaId AS FilaId,
-      @FisioterapeutaId AS FisioterapeutaId;
     RETURN;
   END;
 
@@ -205,11 +185,6 @@ BEGIN
   );
 
   SET @FilaId = CONVERT(INT, SCOPE_IDENTITY());
-
-  SELECT
-    N''Criada'' AS Acao,
-    @FilaId AS FilaId,
-    @FisioterapeutaId AS FisioterapeutaId;
 END;';
 
   DECLARE @Definicao NVARCHAR(MAX) =
@@ -222,6 +197,7 @@ END;';
      OR @Definicao NOT LIKE N'%e-mail não verificado%'
      OR @Definicao NOT LIKE N'%Status = N''Pendente''%'
      OR @Definicao LIKE N'%BEGIN TRAN%'
+     OR @Definicao LIKE N'% AS Acao%'
     THROW 51466, N'V133 falhou: pós-condições da procedure não foram atendidas.', 1;
 
   IF @DryRun = 1

@@ -36,7 +36,6 @@ test('reenfileiramento só ocorre para fisioterapeuta plenamente elegível', () 
   assert.match(v133, /@IsBloqueado <> 0/);
   assert.match(v133, /@CrefitoVerificado <> 1/);
   assert.match(v133, /@EmailVerificado <> 1/);
-  assert.match(v133, /N''NaoElegivel'' AS Acao/);
 });
 
 test('V133 evita duplicidade e reaproveita a falha por e-mail não verificado', () => {
@@ -48,8 +47,15 @@ test('V133 evita duplicidade e reaproveita a falha por e-mail não verificado', 
   assert.match(v133, /Tentativas = 0/);
   assert.match(v133, /ProcessandoEm = NULL/);
   assert.match(v133, /UltimoErro = NULL/);
-  assert.match(v133, /N''Reenfileirada'' AS Acao/);
-  assert.match(v133, /N''Criada'' AS Acao/);
+});
+
+test('procedure não emite result set que interfira no retorno da confirmação', () => {
+  const start = v133.indexOf('CREATE OR ALTER PROCEDURE dbo.SP_Fisio_ReenfileirarCrefitoAprovadoSeElegivel');
+  const end = v133.indexOf("END;'", start);
+  const block = v133.slice(start, end);
+
+  assert.doesNotMatch(block, /\bAS Acao\b/);
+  assert.doesNotMatch(block, /\bSELECT\s+N''(?:NaoElegivel|JaEnviada|JaPendente|Reenfileirada|Criada)''/);
 });
 
 test('confirmação de contato chama a procedure após marcar o e-mail', () => {
@@ -60,6 +66,16 @@ test('confirmação de contato chama a procedure após marcar o e-mail', () => {
   const updateIndex = block.indexOf('SET EmailVerificado = 1');
   const procedureIndex = block.indexOf('SP_Fisio_ReenfileirarCrefitoAprovadoSeElegivel');
   assert.ok(updateIndex >= 0 && procedureIndex > updateIndex);
+});
+
+test('cadastro solicita verificação com contexto do próprio fisioterapeuta', () => {
+  const start = fisioterapeutasService.indexOf('void solicitarVerificacaoContatoInterna({');
+  const end = fisioterapeutasService.indexOf('})', start);
+  const block = fisioterapeutasService.slice(start, end);
+
+  assert.match(block, /usuarioTipo: 'Fisioterapeuta'/);
+  assert.match(block, /usuarioId: novoId/);
+  assert.match(block, /usuario: \{ id: novoId, tipo: 'Fisioterapeuta' \}/);
 });
 
 test('redefinição por e-mail também chama a procedure dentro da transação', () => {
@@ -86,4 +102,3 @@ test('aprovação não enfileira e-mail condenado quando o contato não está ve
   assert.match(approvalBlock, /Confirme seu e-mail para liberar seu perfil para agendamentos/);
   assert.match(approvalBlock, /\{ canal: 'email', gravarInbox: false \}/);
 });
-

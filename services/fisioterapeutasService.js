@@ -1852,6 +1852,7 @@ const fisioterapeutasService = {
       void solicitarVerificacaoContatoInterna({
           usuarioTipo: 'Fisioterapeuta',
           usuarioId: novoId,
+          usuario: { id: novoId, tipo: 'Fisioterapeuta' },
           canal: 'Email',
           expiraEmMinutos: 10,
           montarConteudo: ({ codigo, usuario, expiraEmMinutos }) => montarEmailVerificacaoFisioterapeuta({
