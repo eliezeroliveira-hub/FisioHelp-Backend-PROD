@@ -14,6 +14,10 @@ const redefinicaoSenhaService = fs.readFileSync(
   new URL('../services/redefinicaoSenhaService.js', import.meta.url),
   'utf8'
 );
+const verificacaoContatoService = fs.readFileSync(
+  new URL('../services/verificacaoContatoService.js', import.meta.url),
+  'utf8'
+);
 const dispatch = fs.readFileSync(
   new URL('../services/notificacoesDispatch.js', import.meta.url),
   'utf8'
@@ -76,6 +80,19 @@ test('cadastro solicita verificação com contexto do próprio fisioterapeuta', 
   assert.match(block, /usuarioTipo: 'Fisioterapeuta'/);
   assert.match(block, /usuarioId: novoId/);
   assert.match(block, /usuario: \{ id: novoId, tipo: 'Fisioterapeuta' \}/);
+});
+
+test('serviço usa o contexto recebido também para localizar o contato protegido por RLS', () => {
+  const searchStart = verificacaoContatoService.indexOf('async function buscarUsuarioContato');
+  const searchEnd = verificacaoContatoService.indexOf('\n}', searchStart);
+  const searchBlock = verificacaoContatoService.slice(searchStart, searchEnd);
+  const callStart = verificacaoContatoService.indexOf('const usuarioContato = await buscarUsuarioContato');
+  const callEnd = verificacaoContatoService.indexOf('});', callStart);
+  const callBlock = verificacaoContatoService.slice(callStart, callEnd);
+
+  assert.match(searchBlock, /usuario = null/);
+  assert.match(searchBlock, /queryWithContext\(\s*usuario,/);
+  assert.match(callBlock, /usuario,/);
 });
 
 test('redefinição por e-mail também chama a procedure dentro da transação', () => {

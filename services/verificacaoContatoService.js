@@ -89,10 +89,10 @@ function montarTextoWhatsAppVerificacao({ codigo, expiraEmMinutos }) {
   ].join('\n');
 }
 
-async function buscarUsuarioContato({ usuarioTipo, usuarioId }) {
+async function buscarUsuarioContato({ usuarioTipo, usuarioId, usuario = null }) {
   const table = usuarioTipo === 'Paciente' ? 'dbo.Pacientes' : 'dbo.Fisioterapeutas';
   const result = await queryWithContext(
-    null,
+    usuario,
     (req) => req.input('Id', sql.Int, usuarioId),
     `
       SELECT TOP 1
@@ -132,7 +132,11 @@ export async function solicitarVerificacaoContatoInterna({
     throw new HttpError(400, "Canal inválido. Use 'Email' ou 'Telefone'.");
   }
 
-  const usuarioContato = await buscarUsuarioContato({ usuarioTipo: tipo, usuarioId: id });
+  const usuarioContato = await buscarUsuarioContato({
+    usuarioTipo: tipo,
+    usuarioId: id,
+    usuario,
+  });
   if (!usuarioContato) {
     throw new HttpError(404, `${tipo} não encontrado.`);
   }
