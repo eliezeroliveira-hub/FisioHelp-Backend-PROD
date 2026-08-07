@@ -645,6 +645,12 @@ export async function redefinirSenha(payload = {}) {
           END
       WHERE Id = @UsuarioId;
 
+      IF @UsuarioTipo = N'Fisioterapeuta' AND @Canal = N'Email'
+      BEGIN
+        EXEC dbo.SP_Fisio_ReenfileirarCrefitoAprovadoSeElegivel
+          @FisioterapeutaId = @UsuarioId;
+      END;
+
       UPDATE dbo.RefreshTokens
       SET RevogadoEm = SYSDATETIME(),
           RevogadoMotivo = N'ResetSenha'

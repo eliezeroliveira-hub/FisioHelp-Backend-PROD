@@ -3328,6 +3328,9 @@ const fisioterapeutasService = {
             SET EmailVerificado = 1,
                 EmailVerificadoEm = SYSDATETIME()
             WHERE Id = @FisioterapeutaId;
+
+            EXEC dbo.SP_Fisio_ReenfileirarCrefitoAprovadoSeElegivel
+              @FisioterapeutaId = @FisioterapeutaId;
           END
           ELSE IF @Canal = N'Telefone'
           BEGIN

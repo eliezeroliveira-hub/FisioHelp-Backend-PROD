@@ -254,7 +254,11 @@ async function buscarFisioterapeutaResumo(fisioterapeutaId) {
   }, `
     SELECT TOP (1)
       Id,
-      Nome
+      Nome,
+      Ativo,
+      IsBloqueado,
+      CrefitoVerificado,
+      EmailVerificado
     FROM dbo.Fisioterapeutas
     WHERE Id = @FisioterapeutaId;
   `, { requireContext: true });
@@ -1086,25 +1090,36 @@ async function crefitoAprovado({ fisioterapeutaId }) {
 
     const destinatario = { usuarioTipo: 'Fisioterapeuta', usuarioId: fisio.Id };
     const dados = dadosBase('crefito_aprovado', { fisioterapeutaId: Number(fisio.Id) });
+    const emailVerificado = Number(fisio.EmailVerificado ?? 0) === 1;
+    const perfilElegivel = emailVerificado
+      && Number(fisio.Ativo ?? 0) === 1
+      && Number(fisio.IsBloqueado ?? 0) === 0
+      && Number(fisio.CrefitoVerificado ?? 0) === 1;
 
     const push = await enfileirar(
       destinatario,
       {
         tipo: 'Credenciamento',
         titulo: 'CREFITO verificado',
-        mensagem: 'Seu CREFITO foi aprovado. Seu perfil já está ativo.',
+        mensagem: emailVerificado
+          ? (perfilElegivel
+              ? 'Seu CREFITO foi aprovado. Seu perfil já está ativo.'
+              : 'Seu CREFITO foi aprovado. Revise sua conta para liberar o perfil.')
+          : 'Seu CREFITO foi aprovado. Confirme seu e-mail para liberar seu perfil para agendamentos.',
         referenciaId: Number(fisio.Id),
         dados
       }
     );
 
-    const nome = String(fisio.Nome || 'Fisioterapeuta').trim();
-    const email = await enfileirar(
-      destinatario,
-      {
-        tipo: 'Credenciamento',
-        titulo: 'Seu CREFITO foi aprovado',
-        mensagem: `Olá, ${nome},
+    let email = null;
+    if (emailVerificado) {
+      const nome = String(fisio.Nome || 'Fisioterapeuta').trim();
+      email = await enfileirar(
+        destinatario,
+        {
+          tipo: 'Credenciamento',
+          titulo: 'Seu CREFITO foi aprovado',
+          mensagem: `Olá, ${nome},
 
 Seu CREFITO foi verificado e aprovado com sucesso.
 
@@ -1112,11 +1127,12 @@ Seu perfil já está ativo na FisioHelp. Agora você pode acessar a plataforma, 
 
 Atenciosamente,
 Equipe FisioHelp`,
-        referenciaId: Number(fisio.Id),
-        dados
-      },
-      { canal: 'email', gravarInbox: false }
-    );
+          referenciaId: Number(fisio.Id),
+          dados
+        },
+        { canal: 'email', gravarInbox: false }
+      );
+    }
 
     return push ?? email;
   });
