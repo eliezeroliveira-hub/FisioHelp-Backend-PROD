@@ -1849,7 +1849,8 @@ const fisioterapeutasService = {
 
     if (novoId) {
       fisio.verificacaoEmailEnviada = false;
-      void solicitarVerificacaoContatoInterna({
+      try {
+        const verificacao = await solicitarVerificacaoContatoInterna({
           usuarioTipo: 'Fisioterapeuta',
           usuarioId: novoId,
           usuario: { id: novoId, tipo: 'Fisioterapeuta' },
@@ -1860,19 +1861,18 @@ const fisioterapeutasService = {
             codigo,
             expiraEmMinutos,
           }),
-      })
-        .then((verificacao) => {
-          log('info', 'Verificação de e-mail solicitada no cadastro de fisioterapeuta', {
-            fisioterapeutaId: novoId,
-            destino: verificacao?.destinoMascarado,
-          });
-        })
-        .catch((err) => {
+        });
+        fisio.verificacaoEmailEnviada = true;
+        log('info', 'Verificação de e-mail solicitada no cadastro de fisioterapeuta', {
+          fisioterapeutaId: novoId,
+          destino: verificacao?.destinoMascarado,
+        });
+      } catch (err) {
         log('warn', 'Falha ao enviar e-mail de verificação no cadastro de fisioterapeuta', {
           fisioterapeutaId: novoId,
           erro: err?.message,
         });
-        });
+      }
     }
 
     return fisio;

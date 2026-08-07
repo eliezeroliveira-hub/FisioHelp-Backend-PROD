@@ -73,13 +73,17 @@ test('confirmação de contato chama a procedure após marcar o e-mail', () => {
 });
 
 test('cadastro solicita verificação com contexto do próprio fisioterapeuta', () => {
-  const start = fisioterapeutasService.indexOf('void solicitarVerificacaoContatoInterna({');
+  const start = fisioterapeutasService.indexOf('await solicitarVerificacaoContatoInterna({');
   const end = fisioterapeutasService.indexOf('})', start);
   const block = fisioterapeutasService.slice(start, end);
 
+  assert.ok(start >= 0);
+  assert.doesNotMatch(fisioterapeutasService, /void solicitarVerificacaoContatoInterna\(\{/);
   assert.match(block, /usuarioTipo: 'Fisioterapeuta'/);
   assert.match(block, /usuarioId: novoId/);
   assert.match(block, /usuario: \{ id: novoId, tipo: 'Fisioterapeuta' \}/);
+  assert.match(fisioterapeutasService, /fisioterapeutaId: novoId/);
+  assert.match(fisioterapeutasService, /fisio\.verificacaoEmailEnviada = true/);
 });
 
 test('serviço usa o contexto recebido também para localizar o contato protegido por RLS', () => {
