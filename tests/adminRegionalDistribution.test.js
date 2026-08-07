@@ -13,7 +13,7 @@ function readProjectFile(relativePath) {
 
 const service = readProjectFile('services/adminAnalyticsService.js');
 const routes = readProjectFile('routes/adminAnalytics.js');
-const methodStart = service.indexOf('  async distribuicaoRegional(usuario) {');
+const methodStart = service.indexOf('  async distribuicaoRegional(usuario, _filtros) {');
 const methodEnd = service.indexOf('  retencaoPacientes(usuario, f)', methodStart);
 const method = service.slice(methodStart, methodEnd);
 
@@ -30,6 +30,7 @@ test('rota regional usa o grupo protegido de usuários e chama o método dedicad
 
 test('serviço exige usuário Admin e consulta com contexto administrativo', () => {
   assert.ok(methodStart >= 0 && methodEnd > methodStart);
+  assert.match(method, /async distribuicaoRegional\(usuario, _filtros\)/);
   assert.match(method, /String\(usuario\?\.tipo \|\| ''\)\.toLowerCase\(\) !== 'admin'/);
   assert.match(method, /queryWithContext\(\s*usuario,/);
 });

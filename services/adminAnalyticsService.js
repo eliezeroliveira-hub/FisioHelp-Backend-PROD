@@ -812,7 +812,7 @@ async excluirDespesa(usuario, id) {
   /* --------------------------------------------------------------------
      🧑‍🤝‍🧑 USUÁRIOS
   -------------------------------------------------------------------- */
-  async distribuicaoRegional(usuario) {
+  async distribuicaoRegional(usuario, _filtros) {
     if (String(usuario?.tipo || '').toLowerCase() !== 'admin') {
       throw new HttpError(403, 'Acesso negado.');
     }
