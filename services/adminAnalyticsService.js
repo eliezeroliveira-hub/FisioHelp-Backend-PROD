@@ -2,6 +2,7 @@
 import { sql } from '../config/dbConfig.js';
 import { queryWithContext } from './_queryWithContext.js';
 import { HttpError } from '../utils/httpError.js';
+import { agoraAppDate } from '../utils/appDateTime.js';
 // 🔐 Allowlist de views/tables expostas por este service (evita SQL injection via FROM)
 const VIEW_ALLOWLIST = new Set([
   'analytics.vw_AtividadePacientesMensal',
@@ -811,6 +812,130 @@ async excluirDespesa(usuario, id) {
   /* --------------------------------------------------------------------
      🧑‍🤝‍🧑 USUÁRIOS
   -------------------------------------------------------------------- */
+  async distribuicaoRegional(usuario) {
+    if (String(usuario?.tipo || '').toLowerCase() !== 'admin') {
+      throw new HttpError(403, 'Acesso negado.');
+    }
+
+    const result = await queryWithContext(
+      usuario,
+      (request) => request.input('DataHoje', sql.Date, agoraAppDate()),
+      `
+        IF OBJECT_ID('tempdb..#FisioterapeutasBase') IS NOT NULL
+          DROP TABLE #FisioterapeutasBase;
+
+        IF OBJECT_ID('tempdb..#PacientesBase') IS NOT NULL
+          DROP TABLE #PacientesBase;
+
+        SELECT
+          Estado = COALESCE(NULLIF(UPPER(LTRIM(RTRIM(f.Estado))), N''), N'Não informado'),
+          Cidade = COALESCE(NULLIF(LTRIM(RTRIM(f.Cidade)), N''), N'Não informado'),
+          TemLocalizacao = CASE
+            WHEN NULLIF(LTRIM(RTRIM(f.Estado)), N'') IS NOT NULL
+             AND NULLIF(LTRIM(RTRIM(f.Cidade)), N'') IS NOT NULL THEN 1
+            ELSE 0
+          END,
+          Ativo = CASE WHEN ISNULL(f.Ativo, 0) = 1 AND ISNULL(f.IsBloqueado, 0) = 0 THEN 1 ELSE 0 END,
+          Bloqueado = CASE WHEN ISNULL(f.IsBloqueado, 0) = 1 THEN 1 ELSE 0 END,
+          Inativo = CASE WHEN ISNULL(f.Ativo, 0) = 0 AND ISNULL(f.IsBloqueado, 0) = 0 THEN 1 ELSE 0 END,
+          CrefitoVerificado = CASE WHEN ISNULL(f.CrefitoVerificado, 0) = 1 THEN 1 ELSE 0 END
+        INTO #FisioterapeutasBase
+        FROM dbo.Fisioterapeutas f;
+
+        SELECT
+          Estado = COALESCE(NULLIF(UPPER(LTRIM(RTRIM(p.Estado))), N''), N'Não informado'),
+          Cidade = COALESCE(NULLIF(LTRIM(RTRIM(p.Cidade)), N''), N'Não informado'),
+          TemLocalizacao = CASE
+            WHEN NULLIF(LTRIM(RTRIM(p.Estado)), N'') IS NOT NULL
+             AND NULLIF(LTRIM(RTRIM(p.Cidade)), N'') IS NOT NULL THEN 1
+            ELSE 0
+          END,
+          Ativo = CASE WHEN ISNULL(p.Ativo, 0) = 1 AND ISNULL(p.IsBloqueado, 0) = 0 THEN 1 ELSE 0 END,
+          Bloqueado = CASE WHEN ISNULL(p.IsBloqueado, 0) = 1 THEN 1 ELSE 0 END,
+          Inativo = CASE WHEN ISNULL(p.Ativo, 0) = 0 AND ISNULL(p.IsBloqueado, 0) = 0 THEN 1 ELSE 0 END,
+          Idade = CASE
+            WHEN p.DataNascimento IS NULL OR CONVERT(DATE, p.DataNascimento) > @DataHoje THEN NULL
+            ELSE
+              DATEDIFF(YEAR, CONVERT(DATE, p.DataNascimento), @DataHoje)
+              - CASE
+                  WHEN DATEADD(
+                    YEAR,
+                    DATEDIFF(YEAR, CONVERT(DATE, p.DataNascimento), @DataHoje),
+                    CONVERT(DATE, p.DataNascimento)
+                  ) > @DataHoje THEN 1
+                  ELSE 0
+                END
+          END
+        INTO #PacientesBase
+        FROM dbo.Pacientes p;
+        SELECT
+          Total = COUNT_BIG(1),
+          Ativos = COALESCE(SUM(Ativo), 0),
+          Bloqueados = COALESCE(SUM(Bloqueado), 0),
+          Inativos = COALESCE(SUM(Inativo), 0),
+          CrefitoVerificados = COALESCE(SUM(CrefitoVerificado), 0),
+          ComLocalizacao = COALESCE(SUM(TemLocalizacao), 0),
+          SemLocalizacao = COUNT_BIG(1) - COALESCE(SUM(TemLocalizacao), 0),
+          TotalEstados = COUNT(DISTINCT CASE WHEN Estado <> N'Não informado' THEN Estado END),
+          TotalCidades = COUNT(DISTINCT CASE
+            WHEN Estado <> N'Não informado' AND Cidade <> N'Não informado'
+              THEN CONCAT(Estado, N'|', UPPER(Cidade))
+          END)
+        FROM #FisioterapeutasBase;
+
+        SELECT
+          Total = COUNT_BIG(1),
+          Ativos = COALESCE(SUM(Ativo), 0),
+          Bloqueados = COALESCE(SUM(Bloqueado), 0),
+          Inativos = COALESCE(SUM(Inativo), 0),
+          ComLocalizacao = COALESCE(SUM(TemLocalizacao), 0),
+          SemLocalizacao = COUNT_BIG(1) - COALESCE(SUM(TemLocalizacao), 0),
+          TotalEstados = COUNT(DISTINCT CASE WHEN Estado <> N'Não informado' THEN Estado END),
+          TotalCidades = COUNT(DISTINCT CASE
+            WHEN Estado <> N'Não informado' AND Cidade <> N'Não informado'
+              THEN CONCAT(Estado, N'|', UPPER(Cidade))
+          END),
+          IdadeMedia = CAST(ROUND(AVG(CAST(Idade AS DECIMAL(10, 2))), 1) AS DECIMAL(10, 1)),
+          PacientesComIdadeInformada = COUNT(Idade)
+        FROM #PacientesBase;
+
+        SELECT
+          Estado,
+          Cidade,
+          Total = COUNT_BIG(1),
+          Ativos = COALESCE(SUM(Ativo), 0),
+          Bloqueados = COALESCE(SUM(Bloqueado), 0),
+          Inativos = COALESCE(SUM(Inativo), 0),
+          CrefitoVerificados = COALESCE(SUM(CrefitoVerificado), 0)
+        FROM #FisioterapeutasBase
+        GROUP BY Estado, Cidade
+        ORDER BY Total DESC, Estado ASC, Cidade ASC;
+
+        SELECT
+          Estado,
+          Cidade,
+          Total = COUNT_BIG(1),
+          Ativos = COALESCE(SUM(Ativo), 0),
+          Bloqueados = COALESCE(SUM(Bloqueado), 0),
+          Inativos = COALESCE(SUM(Inativo), 0),
+          IdadeMedia = CAST(ROUND(AVG(CAST(Idade AS DECIMAL(10, 2))), 1) AS DECIMAL(10, 1)),
+          PacientesComIdadeInformada = COUNT(Idade)
+        FROM #PacientesBase
+        GROUP BY Estado, Cidade
+        ORDER BY Total DESC, Estado ASC, Cidade ASC;
+      `
+    );
+
+    return {
+      resumo: {
+        fisioterapeutas: result.recordsets?.[0]?.[0] ?? null,
+        pacientes: result.recordsets?.[1]?.[0] ?? null,
+      },
+      fisioterapeutas: result.recordsets?.[2] ?? [],
+      pacientes: result.recordsets?.[3] ?? [],
+    };
+  },
+
   retencaoPacientes(usuario, f)           { return this.fetchView(usuario, 'analytics.vw_RetencaoPacientes', f); },
   atividadePacientes(usuario, f)          { return this.fetchView(usuario, 'analytics.vw_AtividadePacientesMensal', f); },
 

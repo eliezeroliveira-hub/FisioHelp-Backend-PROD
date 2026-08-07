@@ -92,6 +92,7 @@ router.get('/crescimento/projecao-mensal', requireAdminPagePermission('relatorio
 router.get('/crescimento/projecao-anual', requireAdminPagePermission(['relatorios-financeiros', 'relatorios-plataforma']), wrap((req) => call('projecaoAnual', req, req.query)));
 
 /* ---------------------- USUÁRIOS ---------------------- */
+router.get('/usuarios/distribuicao-regional', wrap((req) => call('distribuicaoRegional', req, req.query)));
 router.get('/usuarios/retencao',            wrap((req) => call('retencaoPacientes', req, req.query)));
 router.get('/usuarios/atividade-pacientes', wrap((req) => call('atividadePacientes', req, req.query)));
 
