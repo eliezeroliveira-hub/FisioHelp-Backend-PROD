@@ -1792,7 +1792,15 @@ const fisioterapeutasService = {
         `
     );
 
-    const novoId = insert.recordset[0].Id;
+    const insertRecordsets = Array.isArray(insert.recordsets) ? insert.recordsets : [];
+    const idRecordset = insertRecordsets.length > 0
+      ? insertRecordsets[insertRecordsets.length - 1]
+      : insert.recordset;
+    const novoId = Number(idRecordset?.[0]?.Id);
+
+    if (!Number.isInteger(novoId) || novoId <= 0) {
+      throw new HttpError(500, 'Não foi possível identificar o fisioterapeuta criado.');
+    }
 
     //  Em alguns ambientes, a vw_FisioterapeutaPerfilCompleto pode não retornar o recém-criado
     // (por regras de view/RLS). Nesse caso, caímos para um SELECT direto na tabela, para evitar
@@ -1846,33 +1854,31 @@ const fisioterapeutasService = {
     }
 
     fisio.TipoPessoa = fisio.TipoPessoa ?? tipoPessoa;
+    fisio.verificacaoEmailEnviada = false;
 
-    if (novoId) {
-      fisio.verificacaoEmailEnviada = false;
-      try {
-        const verificacao = await solicitarVerificacaoContatoInterna({
-          usuarioTipo: 'Fisioterapeuta',
-          usuarioId: novoId,
-          usuario: { id: novoId, tipo: 'Fisioterapeuta' },
-          canal: 'Email',
-          expiraEmMinutos: 10,
-          montarConteudo: ({ codigo, usuario, expiraEmMinutos }) => montarEmailVerificacaoFisioterapeuta({
-            nome: usuario?.Nome || fisio?.Nome || Nome,
-            codigo,
-            expiraEmMinutos,
-          }),
-        });
-        fisio.verificacaoEmailEnviada = true;
-        log('info', 'Verificação de e-mail solicitada no cadastro de fisioterapeuta', {
-          fisioterapeutaId: novoId,
-          destino: verificacao?.destinoMascarado,
-        });
-      } catch (err) {
-        log('warn', 'Falha ao enviar e-mail de verificação no cadastro de fisioterapeuta', {
-          fisioterapeutaId: novoId,
-          erro: err?.message,
-        });
-      }
+    try {
+      const verificacao = await solicitarVerificacaoContatoInterna({
+        usuarioTipo: 'Fisioterapeuta',
+        usuarioId: novoId,
+        usuario: { id: novoId, tipo: 'Fisioterapeuta' },
+        canal: 'Email',
+        expiraEmMinutos: 10,
+        montarConteudo: ({ codigo, usuario, expiraEmMinutos }) => montarEmailVerificacaoFisioterapeuta({
+          nome: usuario?.Nome || fisio?.Nome || Nome,
+          codigo,
+          expiraEmMinutos,
+        }),
+      });
+      fisio.verificacaoEmailEnviada = true;
+      log('info', 'Verificação de e-mail solicitada no cadastro de fisioterapeuta', {
+        fisioterapeutaId: novoId,
+        destino: verificacao?.destinoMascarado,
+      });
+    } catch (err) {
+      log('warn', 'Falha ao enviar e-mail de verificação no cadastro de fisioterapeuta', {
+        fisioterapeutaId: novoId,
+        erro: err?.message,
+      });
     }
 
     return fisio;
