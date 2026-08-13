@@ -1949,6 +1949,7 @@ const fisioterapeutasService = {
       }
     }
 
+    fisio.Id = Number(fisio.Id ?? fisio.FisioterapeutaId ?? novoId);
     fisio.TipoPessoa = fisio.TipoPessoa ?? tipoPessoa;
     fisio.verificacaoEmailEnviada = false;
     fisio.contatosPrevalidados = contatosPrevalidados;

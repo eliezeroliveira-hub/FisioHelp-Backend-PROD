@@ -49,6 +49,13 @@ test('criação consome a sessão na mesma transação e grava os dois contatos 
   assert.match(block, /FisioterapeutaId = @FisioId/);
 });
 
+test('cadastro público sempre devolve Id mesmo quando o perfil completo usa FisioterapeutaId', () => {
+  assert.match(
+    fisioterapeutasService,
+    /fisio\.Id = Number\(fisio\.Id \?\? fisio\.FisioterapeutaId \?\? novoId\)/
+  );
+});
+
 test('env valida modos de rollout e o fluxo novo não envia e-mail pós-criação', () => {
   assert.match(env, /FISIO_CADASTRO_CONTATO_PREVALIDACAO_MODE/);
   assert.match(env, /\['optional', 'required'\]/);
