@@ -29,6 +29,14 @@ function parsePositiveIntEnv(name, fallback) {
   return n;
 }
 
+function parseModeEnv(name, fallback, allowed) {
+  const value = String(process.env[name] || fallback).trim().toLowerCase();
+  if (!allowed.includes(value)) {
+    throw new Error(`${name} inválido. Use ${allowed.join(', ')}.`);
+  }
+  return value;
+}
+
 const tokenExpirationRaw = process.env.TOKEN_EXPIRATION || '1d';
 if (!/^\d+[smhd]$/.test(tokenExpirationRaw)) {
   throw new Error('TOKEN_EXPIRATION inválido. Use formato como 15m, 1h, 7d.');
@@ -112,6 +120,18 @@ if (fileStorageProvider === 'azure' && !azureStorageConnectionString) {
 }
 
 const refreshTokenDays = parsePositiveIntEnv('REFRESH_TOKEN_DAYS', 30);
+const fisioCadastroContatoPrevalidacaoMode = parseModeEnv(
+  'FISIO_CADASTRO_CONTATO_PREVALIDACAO_MODE',
+  'optional',
+  ['optional', 'required']
+);
+const fisioLoginContatoGateMode = parseModeEnv(
+  'FISIO_LOGIN_CONTATO_GATE_MODE',
+  'off',
+  ['off', 'email', 'email_phone']
+);
+const fisioCadastroEmailDailyMax = parsePositiveIntEnv('FISIO_CADASTRO_EMAIL_DAILY_MAX', 10);
+const fisioCadastroTelefoneDailyMax = parsePositiveIntEnv('FISIO_CADASTRO_TELEFONE_DAILY_MAX', 6);
 
 /**
  * Variáveis globais do ambiente
@@ -135,6 +155,10 @@ export const ENV = {
   TOKEN_EXPIRATION: tokenExpirationRaw,
   OAUTH_AUTOCREATE: process.env.OAUTH_AUTOCREATE, // agora incluído
   REFRESH_TOKEN_DAYS: refreshTokenDays,
+  FISIO_CADASTRO_CONTATO_PREVALIDACAO_MODE: fisioCadastroContatoPrevalidacaoMode,
+  FISIO_LOGIN_CONTATO_GATE_MODE: fisioLoginContatoGateMode,
+  FISIO_CADASTRO_EMAIL_DAILY_MAX: fisioCadastroEmailDailyMax,
+  FISIO_CADASTRO_TELEFONE_DAILY_MAX: fisioCadastroTelefoneDailyMax,
 
   // Logs e informações gerais
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',

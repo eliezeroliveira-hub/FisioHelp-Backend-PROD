@@ -12,6 +12,7 @@ import {
   montarEmailVerificacaoFisioterapeuta,
 } from './contatoTemplates.js';
 import { solicitarVerificacaoContatoInterna } from './verificacaoContatoService.js';
+import { validarProvaContatoCadastro } from './fisioterapeutaCadastroContatoService.js';
 import { authService } from './authService.js';
 import contatoProvider from '../providers/contatoProvider.js';
 import { HttpError } from '../utils/httpError.js';
@@ -540,6 +541,7 @@ function normalizarPaginacao(page, pageSize) {
 }
 
 function mapFisioterapeutaCreateError(err) {
+  if (err instanceof HttpError) return err;
   const oauthErr = authService.mapOAuthCadastroDbError?.(err);
   if (oauthErr) return oauthErr;
 
@@ -554,6 +556,25 @@ function mapFisioterapeutaCreateError(err) {
     err?.originalError?.message ||
     ''
   ).toLowerCase();
+
+  if (msg.includes('cadastro_session_not_found')) {
+    return new HttpError(422, 'Sessão de validação de contatos não encontrada.');
+  }
+  if (msg.includes('cadastro_session_expired')) {
+    return new HttpError(422, 'A validação de e-mail e telefone expirou. Inicie novamente.');
+  }
+  if (msg.includes('cadastro_session_consumed')) {
+    return new HttpError(409, 'A validação de e-mail e telefone já foi utilizada.');
+  }
+  if (msg.includes('cadastro_session_mismatch')) {
+    return new HttpError(422, 'A validação não corresponde ao CREFITO, e-mail e telefone informados.');
+  }
+  if (msg.includes('cadastro_contacts_not_confirmed')) {
+    return new HttpError(422, 'Confirme o e-mail e o telefone antes de concluir o cadastro.');
+  }
+  if (msg.includes('cadastro_contact_table_missing')) {
+    return new HttpError(503, 'Validação de cadastro temporariamente indisponível.');
+  }
 
   if (num === 2601 || num === 2627 || msg.includes('duplicate key')) {
     if (
@@ -1509,6 +1530,21 @@ const fisioterapeutasService = {
     }
 
     const crefito = normalizarCrefito(CREFITO);
+    const provaContato = dados?.ContatoVerificationProof ?? dados?.contatoVerificationProof ?? null;
+    const validacaoContato = provaContato
+      ? validarProvaContatoCadastro(provaContato, {
+          email: emailNorm,
+          telefone: telefoneNorm,
+          crefito,
+        })
+      : null;
+    const contatosPrevalidados = Boolean(validacaoContato?.sessaoId);
+    if (
+      !contatosPrevalidados &&
+      ENV.FISIO_CADASTRO_CONTATO_PREVALIDACAO_MODE === 'required'
+    ) {
+      throw new HttpError(422, 'Confirme o e-mail e o telefone antes de concluir o cadastro.');
+    }
     const uf = Estado.toUpperCase().trim();
     const documentoProfissional = normalizarDocumentoProfissional({ TipoPessoa, CPF, CNPJ });
     const tipoPessoa = documentoProfissional.TipoPessoa;
@@ -1648,6 +1684,8 @@ const fisioterapeutasService = {
         req.input('OAuthJti', sql.NVarChar(36), oauthCadastro?.jti || null);
         req.input('OAuthProvedor', sql.NVarChar(30), oauthCadastro?.provider || null);
         req.input('OAuthSubject', sql.NVarChar(255), oauthCadastro?.subject || null);
+        req.input('CadastroSessaoId', sql.UniqueIdentifier, validacaoContato?.sessaoId || null);
+        req.input('ContatosPrevalidados', sql.Bit, contatosPrevalidados ? 1 : 0);
         req.input('AgoraBrasil', sql.DateTime2(7), agoraAppDate());
       },
       `
@@ -1655,6 +1693,45 @@ const fisioterapeutasService = {
 
         BEGIN TRY
           BEGIN TRAN;
+
+          IF @ContatosPrevalidados = 1
+          BEGIN
+            IF OBJECT_ID(N'dbo.FisioterapeutaCadastroSessoes', N'U') IS NULL
+              THROW 50400, N'CADASTRO_CONTACT_TABLE_MISSING', 1;
+
+            DECLARE @CadastroStatus NVARCHAR(30) = NULL;
+            DECLARE @CadastroExpiraEm DATETIME2(7) = NULL;
+            DECLARE @CadastroEmail NVARCHAR(300) = NULL;
+            DECLARE @CadastroTelefone NVARCHAR(20) = NULL;
+            DECLARE @CadastroCrefito NVARCHAR(20) = NULL;
+            DECLARE @CadastroConsumidoEm DATETIME2(7) = NULL;
+
+            SELECT
+              @CadastroStatus = Status,
+              @CadastroExpiraEm = ExpiraEm,
+              @CadastroEmail = EmailNormalizado,
+              @CadastroTelefone = TelefoneNormalizado,
+              @CadastroCrefito = CrefitoNormalizado,
+              @CadastroConsumidoEm = ConsumidoEm
+            FROM dbo.FisioterapeutaCadastroSessoes WITH (UPDLOCK, HOLDLOCK)
+            WHERE Id = @CadastroSessaoId;
+
+            IF @CadastroStatus IS NULL
+              THROW 50401, N'CADASTRO_SESSION_NOT_FOUND', 1;
+            IF @CadastroStatus = N'Consumido' OR @CadastroConsumidoEm IS NOT NULL
+              THROW 50402, N'CADASTRO_SESSION_CONSUMED', 1;
+            IF @CadastroStatus IN (N'Expirado', N'Cancelado') OR @CadastroExpiraEm <= SYSDATETIME()
+              THROW 50403, N'CADASTRO_SESSION_EXPIRED', 1;
+            IF @CadastroEmail <> @Email OR @CadastroTelefone <> @Telefone OR @CadastroCrefito <> @CREFITO
+              THROW 50404, N'CADASTRO_SESSION_MISMATCH', 1;
+            IF @CadastroStatus <> N'ContatosConfirmados'
+              OR (SELECT COUNT_BIG(1)
+                  FROM dbo.FisioterapeutaCadastroVerificacoes WITH (UPDLOCK, HOLDLOCK)
+                  WHERE CadastroSessaoId = @CadastroSessaoId
+                    AND Status = N'Confirmado'
+                    AND Canal IN (N'Email', N'Telefone')) <> 2
+              THROW 50413, N'CADASTRO_CONTACTS_NOT_CONFIRMED', 1;
+          END
 
           DECLARE @OAuthTokenId UNIQUEIDENTIFIER = TRY_CONVERT(UNIQUEIDENTIFIER, @OAuthJti);
           DECLARE @OAuthEmailAtual NVARCHAR(300) = NULL;
@@ -1725,6 +1802,8 @@ const fisioterapeutasService = {
             ValorConsultaBase, ConfirmacaoAutomatica,
             TipoConta, DescontoPacote,
             Ativo, IsBloqueado, CrefitoVerificado,
+            EmailVerificado, EmailVerificadoEm,
+            TelefoneVerificado, TelefoneVerificadoEm,
             Genero,
             DataCadastro
           )
@@ -1736,6 +1815,8 @@ const fisioterapeutasService = {
             @ValorConsultaBase, @ConfirmacaoAutomatica,
             @TipoConta, @DescontoPacote,
             @Ativo, @IsBloqueado, @CrefitoVerificado,
+            @ContatosPrevalidados, CASE WHEN @ContatosPrevalidados = 1 THEN @AgoraBrasil ELSE NULL END,
+            @ContatosPrevalidados, CASE WHEN @ContatosPrevalidados = 1 THEN @AgoraBrasil ELSE NULL END,
             @Genero,
             @AgoraBrasil
           );
@@ -1779,6 +1860,21 @@ const fisioterapeutasService = {
 
           DECLARE @FisioterapeutaId INT = @FisioId;
           EXEC dbo.sp_GerarCodigoIndicacao @FisioterapeutaId;
+
+          IF @ContatosPrevalidados = 1
+          BEGIN
+            UPDATE dbo.FisioterapeutaCadastroSessoes
+            SET Status = N'Consumido',
+                ConsumidoEm = SYSDATETIME(),
+                FisioterapeutaId = @FisioId,
+                AtualizadoEm = SYSDATETIME()
+            WHERE Id = @CadastroSessaoId
+              AND Status = N'ContatosConfirmados'
+              AND ConsumidoEm IS NULL;
+
+            IF @@ROWCOUNT <> 1
+              THROW 50402, N'CADASTRO_SESSION_CONSUMED', 1;
+          END
 
           COMMIT;
 
@@ -1855,30 +1951,33 @@ const fisioterapeutasService = {
 
     fisio.TipoPessoa = fisio.TipoPessoa ?? tipoPessoa;
     fisio.verificacaoEmailEnviada = false;
+    fisio.contatosPrevalidados = contatosPrevalidados;
 
-    try {
-      const verificacao = await solicitarVerificacaoContatoInterna({
-        usuarioTipo: 'Fisioterapeuta',
-        usuarioId: novoId,
-        usuario: { id: novoId, tipo: 'Fisioterapeuta' },
-        canal: 'Email',
-        expiraEmMinutos: 10,
-        montarConteudo: ({ codigo, usuario, expiraEmMinutos }) => montarEmailVerificacaoFisioterapeuta({
-          nome: usuario?.Nome || fisio?.Nome || Nome,
-          codigo,
-          expiraEmMinutos,
-        }),
-      });
-      fisio.verificacaoEmailEnviada = true;
-      log('info', 'Verificação de e-mail solicitada no cadastro de fisioterapeuta', {
-        fisioterapeutaId: novoId,
-        destino: verificacao?.destinoMascarado,
-      });
-    } catch (err) {
-      log('warn', 'Falha ao enviar e-mail de verificação no cadastro de fisioterapeuta', {
-        fisioterapeutaId: novoId,
-        erro: err?.message,
-      });
+    if (!contatosPrevalidados) {
+      try {
+        const verificacao = await solicitarVerificacaoContatoInterna({
+          usuarioTipo: 'Fisioterapeuta',
+          usuarioId: novoId,
+          usuario: { id: novoId, tipo: 'Fisioterapeuta' },
+          canal: 'Email',
+          expiraEmMinutos: 10,
+          montarConteudo: ({ codigo, usuario, expiraEmMinutos }) => montarEmailVerificacaoFisioterapeuta({
+            nome: usuario?.Nome || fisio?.Nome || Nome,
+            codigo,
+            expiraEmMinutos,
+          }),
+        });
+        fisio.verificacaoEmailEnviada = true;
+        log('info', 'Verificação de e-mail solicitada no cadastro legado de fisioterapeuta', {
+          fisioterapeutaId: novoId,
+          destino: verificacao?.destinoMascarado,
+        });
+      } catch (err) {
+        log('warn', 'Falha ao enviar e-mail de verificação no cadastro legado de fisioterapeuta', {
+          fisioterapeutaId: novoId,
+          erro: err?.message,
+        });
+      }
     }
 
     return fisio;
@@ -3063,10 +3162,62 @@ const fisioterapeutasService = {
 
     return result.recordset;
   },
-// ==============================
+  // ==============================
   // Confiabilidade (Fisioterapeuta)
   // Exige: CrefitoVerificado + EmailVerificado + TelefoneVerificado
   // ==============================
+  async obterStatusVerificacaoContato(fisioterapeutaId, usuario = null) {
+    const id = Number(fisioterapeutaId);
+    if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, 'Fisioterapeuta inválido.');
+    const ctx = safeUsuario(usuario) || { id, tipo: 'Fisioterapeuta' };
+    const result = await queryWithContext(ctx, (req) => req.input('Id', sql.Int, id), `
+      SELECT TOP (1)
+        Id, Email, Telefone, EmailVerificado, TelefoneVerificado,
+        CrefitoVerificado, Ativo, IsBloqueado
+      FROM dbo.Fisioterapeutas
+      WHERE Id = @Id;
+    `, { requireContext: true });
+    const row = result.recordset?.[0];
+    if (!row) return null;
+
+    const emailVerificado = Number(row.EmailVerificado ?? 0) === 1;
+    const telefoneVerificado = Number(row.TelefoneVerificado ?? 0) === 1;
+    const crefitoVerificado = Number(row.CrefitoVerificado ?? 0) === 1;
+    const ativo = Number(row.Ativo ?? 0) === 1;
+    const bloqueado = Number(row.IsBloqueado ?? 0) === 1;
+    const elegivelPublicamente = ativo && !bloqueado && crefitoVerificado && emailVerificado;
+    const motivosInelegibilidade = [];
+    if (!ativo) motivosInelegibilidade.push('ContaInativa');
+    if (bloqueado) motivosInelegibilidade.push('ContaBloqueada');
+    if (!crefitoVerificado) motivosInelegibilidade.push('CrefitoPendente');
+    if (!emailVerificado) motivosInelegibilidade.push('EmailPendente');
+
+    const gateMode = ENV.FISIO_LOGIN_CONTATO_GATE_MODE;
+    const pendenciasObrigatorias = [];
+    if (gateMode !== 'off' && !emailVerificado) pendenciasObrigatorias.push('Email');
+    if (gateMode === 'email_phone' && !telefoneVerificado) pendenciasObrigatorias.push('Telefone');
+
+    return {
+      email: {
+        verificado: emailVerificado,
+        destinoMascarado: contatoProvider.mascararDestino('Email', row.Email),
+        podeVerificar: Boolean(row.Email),
+      },
+      telefone: {
+        verificado: telefoneVerificado,
+        destinoMascarado: contatoProvider.mascararDestino('Telefone', normalizarTelefoneBR(row.Telefone)),
+        podeVerificar: Boolean(row.Telefone),
+      },
+      contatosVerificados: emailVerificado && telefoneVerificado,
+      crefitoVerificado,
+      elegivelPublicamente,
+      motivosInelegibilidade,
+      gateMode,
+      pendenciasObrigatorias,
+      gateObrigatorio: pendenciasObrigatorias.length > 0,
+    };
+  },
+
   async obterConfiabilidade({ fisioterapeutaId, usuario }) {
     const ctx = safeUsuario(usuario) || { id: fisioterapeutaId, tipo: 'Fisioterapeuta' };
     const resultado = await queryWithContext(

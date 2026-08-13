@@ -1092,6 +1092,25 @@ const fisioterapeutasController = {
   // ==============================
   // Confiabilidade + Verificação de contato (Email/Telefone)
   // ==============================
+  async statusVerificacaoMe(req, res) {
+    try {
+      const id = Number(req.usuario?.id);
+      if (!id || req.usuario?.tipo !== 'Fisioterapeuta') {
+        return res.status(403).json({ sucesso: false, erro: 'Acesso negado.' });
+      }
+      const status = await fisioterapeutasService.obterStatusVerificacaoContato(id, {
+        id,
+        tipo: 'Fisioterapeuta',
+      });
+      if (!status) {
+        return res.status(404).json({ sucesso: false, erro: 'Fisioterapeuta não encontrado.' });
+      }
+      return res.json({ sucesso: true, ...status });
+    } catch (error) {
+      return handleError(res, error);
+    }
+  },
+
   async obterConfiabilidade(req, res) {
     try {
       const id = Number(req.params.id);

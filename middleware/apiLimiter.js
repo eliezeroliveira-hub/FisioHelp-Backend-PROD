@@ -18,9 +18,30 @@ const contatoPublicoWindowMs = parsePositiveInt(process.env.CONTATO_PUBLICO_RATE
 const contatoPublicoMax = parsePositiveInt(process.env.CONTATO_PUBLICO_RATE_LIMIT_MAX, 5);
 const contatoPublicoEmailWindowMs = parsePositiveInt(process.env.CONTATO_PUBLICO_EMAIL_RATE_LIMIT_WINDOW_MS, 30 * 60 * 1000);
 const contatoPublicoEmailMax = parsePositiveInt(process.env.CONTATO_PUBLICO_EMAIL_RATE_LIMIT_MAX, 3);
+const fisioCadastroContatoIpWindowMs = parsePositiveInt(
+  process.env.FISIO_CADASTRO_CONTATO_IP_RATE_LIMIT_WINDOW_MS,
+  15 * 60 * 1000
+);
+const fisioCadastroContatoIpMax = parsePositiveInt(process.env.FISIO_CADASTRO_CONTATO_IP_RATE_LIMIT_MAX, 20);
+const fisioCadastroEmailWindowMs = parsePositiveInt(
+  process.env.FISIO_CADASTRO_EMAIL_RATE_LIMIT_WINDOW_MS,
+  30 * 60 * 1000
+);
+const fisioCadastroEmailMax = parsePositiveInt(process.env.FISIO_CADASTRO_EMAIL_RATE_LIMIT_MAX, 5);
+const fisioCadastroTelefoneWindowMs = parsePositiveInt(
+  process.env.FISIO_CADASTRO_TELEFONE_RATE_LIMIT_WINDOW_MS,
+  60 * 60 * 1000
+);
+const fisioCadastroTelefoneMax = parsePositiveInt(process.env.FISIO_CADASTRO_TELEFONE_RATE_LIMIT_MAX, 4);
 
 function normalizarEmailRateLimit(value) {
   return String(value || '').trim().toLowerCase();
+}
+
+function normalizarTelefoneRateLimit(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) return digits.slice(2);
+  return digits;
 }
 
 export const apiLimiter = rateLimit({
@@ -83,6 +104,37 @@ export const contatoPublicoEmailLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => `email:${normalizarEmailRateLimit(req.body?.email) || 'nao-informado'}`,
   message: { erro: 'Muitas mensagens enviadas para este e-mail. Tente novamente mais tarde.' }
+});
+
+export const cadastroFisioContatoIpLimiter = rateLimit({
+  windowMs: fisioCadastroContatoIpWindowMs,
+  max: fisioCadastroContatoIpMax,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: rateLimitKeyByIp,
+  message: { erro: 'Muitas tentativas de validação. Tente novamente em alguns minutos.' }
+});
+
+export const cadastroFisioEmailLimiter = rateLimit({
+  windowMs: fisioCadastroEmailWindowMs,
+  max: fisioCadastroEmailMax,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `fisio-email:${normalizarEmailRateLimit(req.body?.Email ?? req.body?.email) || 'nao-informado'}`,
+  message: { erro: 'Muitas solicitações para este e-mail. Tente novamente mais tarde.' }
+});
+
+export const cadastroFisioTelefoneLimiter = rateLimit({
+  windowMs: fisioCadastroTelefoneWindowMs,
+  max: fisioCadastroTelefoneMax,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const telefone = normalizarTelefoneRateLimit(req.body?.Telefone ?? req.body?.telefone);
+    const sessao = String(req.body?.CadastroValidacaoId ?? req.body?.cadastroValidacaoId ?? '').trim().toLowerCase();
+    return `fisio-telefone:${telefone || sessao || 'nao-informado'}`;
+  },
+  message: { erro: 'Muitas solicitações para este telefone. Tente novamente mais tarde.' }
 });
 
 export default apiLimiter;

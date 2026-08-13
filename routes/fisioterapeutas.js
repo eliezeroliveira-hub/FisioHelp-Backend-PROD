@@ -44,6 +44,14 @@ router.get(
   fisioterapeutasController.perfilCompleto
 );
 
+router.get(
+  '/me/status-verificacao',
+  autenticarJWT,
+  requireAuth,
+  verificarPermissao(['Fisioterapeuta']),
+  fisioterapeutasController.statusVerificacaoMe
+);
+
 
 // 📊 Avaliações & reputação (somente o fisioterapeuta logado)
 router.get(
