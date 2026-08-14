@@ -4,10 +4,13 @@ import crypto from 'crypto';
 import path from 'path';
 import { sql } from '../config/dbConfig.js';
 import { log } from '../config/logger.js';
+import { ENV } from '../config/env.js';
 import { queryWithContext } from './_queryWithContext.js';
 import { montarEmailVerificacaoPaciente } from './contatoTemplates.js';
 import { solicitarVerificacaoContatoInterna } from './verificacaoContatoService.js';
+import { validarProvaContatoCadastro } from './pacienteCadastroContatoService.js';
 import { authService } from './authService.js';
+import contatoProvider from '../providers/contatoProvider.js';
 import { HttpError } from '../utils/httpError.js';
 import { getContatoSecret } from '../utils/contactSecret.js';
 import { isValidCPF, isValidEmail, normalizeEmail } from '../utils/identityValidators.js';
@@ -175,6 +178,28 @@ function getSqlErrText(e) {
 }
 
 function mapUniqueError(e) {
+  if (e instanceof HttpError) return e;
+
+  const marker = String(getSqlErrText(e) || '').toLowerCase();
+
+  if (marker.includes('cadastro_session_not_found')) {
+    return httpError('Sessão de validação de contatos não encontrada.', 422);
+  }
+  if (marker.includes('cadastro_session_expired')) {
+    return httpError('A validação de e-mail e telefone expirou. Inicie novamente.', 422);
+  }
+  if (marker.includes('cadastro_session_consumed')) {
+    return httpError('A validação de e-mail e telefone já foi utilizada.', 409);
+  }
+  if (marker.includes('cadastro_session_mismatch')) {
+    return httpError('A validação não corresponde ao CPF, e-mail e telefone informados.', 422);
+  }
+  if (marker.includes('cadastro_contacts_not_confirmed')) {
+    return httpError('Confirme o e-mail e o telefone antes de concluir o cadastro.', 422);
+  }
+  if (marker.includes('cadastro_contact_table_missing')) {
+    return httpError('Validação de cadastro temporariamente indisponível.', 503);
+  }
   const oauthErr = authService.mapOAuthCadastroDbError?.(e);
   if (oauthErr) return oauthErr;
 
@@ -305,7 +330,7 @@ export const pacientesService = {
   async criar(dados) {
     try {
       const Nome = normStr(dados?.Nome, 300);
-      const Email = normStr(dados?.Email, 300);
+      const Email = normalizeEmail(normStr(dados?.Email, 300));
       const CPF = normalizeDigits(dados?.CPF);
       const Telefone = normalizeDigits(dados?.Telefone);
       const DataNascimento = normalizeDateInput(dados?.DataNascimento ?? null, 'DataNascimento');
@@ -342,6 +367,22 @@ export const pacientesService = {
       validateLocalidade(Cidade, 'Cidade');
       validateLocalidade(Estado, 'Estado');
 
+      const provaContato = dados?.ContatoVerificationProof ?? dados?.contatoVerificationProof ?? null;
+      const validacaoContato = provaContato
+        ? validarProvaContatoCadastro(provaContato, {
+            email: Email,
+            telefone: Telefone,
+            cpf: CPF,
+          })
+        : null;
+      const contatosPrevalidados = Boolean(validacaoContato?.sessaoId);
+      if (
+        !contatosPrevalidados &&
+        ENV.PACIENTE_CADASTRO_CONTATO_PREVALIDACAO_MODE === 'required'
+      ) {
+        throw httpError('Confirme o e-mail e o telefone antes de concluir o cadastro.', 422);
+      }
+
       const cpfValido = 1;
 
       const senhaHash = await bcrypt.hash(String(Senha), 12);
@@ -373,12 +414,50 @@ export const pacientesService = {
           .input('ComplementoComercial', sql.NVarChar(400), ComplementoComercial)
           .input('OAuthJti', sql.NVarChar(36), oauthCadastro?.jti || null)
           .input('OAuthProvedor', sql.NVarChar(30), oauthCadastro?.provider || null)
-          .input('OAuthSubject', sql.NVarChar(255), oauthCadastro?.subject || null),
+          .input('OAuthSubject', sql.NVarChar(255), oauthCadastro?.subject || null)
+          .input('CadastroSessaoId', sql.UniqueIdentifier, validacaoContato?.sessaoId || null)
+          .input('ContatosPrevalidados', sql.Bit, contatosPrevalidados ? 1 : 0),
         `
         SET XACT_ABORT ON;
 
         BEGIN TRY
           BEGIN TRAN;
+
+          IF @ContatosPrevalidados = 1
+          BEGIN
+            IF OBJECT_ID(N'dbo.PacienteCadastroSessoes', N'U') IS NULL
+              THROW 50400, N'CADASTRO_CONTACT_TABLE_MISSING', 1;
+
+            DECLARE @CadastroStatus NVARCHAR(30) = NULL;
+            DECLARE @CadastroExpiraEm DATETIME2(7) = NULL;
+            DECLARE @CadastroEmail NVARCHAR(300) = NULL;
+            DECLARE @CadastroTelefone NVARCHAR(20) = NULL;
+            DECLARE @CadastroCPF NVARCHAR(20) = NULL;
+            DECLARE @CadastroConsumidoEm DATETIME2(7) = NULL;
+
+            SELECT
+              @CadastroStatus = Status,
+              @CadastroExpiraEm = ExpiraEm,
+              @CadastroEmail = EmailNormalizado,
+              @CadastroTelefone = TelefoneNormalizado,
+              @CadastroCPF = CPFNormalizado,
+              @CadastroConsumidoEm = ConsumidoEm
+            FROM dbo.PacienteCadastroSessoes WITH (UPDLOCK, HOLDLOCK)
+            WHERE Id = @CadastroSessaoId;
+
+            IF @CadastroStatus IS NULL THROW 50401, N'CADASTRO_SESSION_NOT_FOUND', 1;
+            IF @CadastroStatus = N'Consumido' OR @CadastroConsumidoEm IS NOT NULL
+              THROW 50402, N'CADASTRO_SESSION_CONSUMED', 1;
+            IF @CadastroStatus IN (N'Expirado', N'Cancelado') OR @CadastroExpiraEm <= SYSDATETIME()
+              THROW 50403, N'CADASTRO_SESSION_EXPIRED', 1;
+            IF @CadastroEmail <> @Email OR @CadastroTelefone <> @Telefone OR @CadastroCPF <> @CPF
+              THROW 50404, N'CADASTRO_SESSION_MISMATCH', 1;
+            IF @CadastroStatus <> N'ContatosConfirmados'
+              OR (SELECT COUNT_BIG(1) FROM dbo.PacienteCadastroVerificacoes WITH (UPDLOCK, HOLDLOCK)
+                  WHERE CadastroSessaoId = @CadastroSessaoId AND Status = N'Confirmado'
+                    AND Canal IN (N'Email', N'Telefone')) <> 2
+              THROW 50413, N'CADASTRO_CONTACTS_NOT_CONFIRMED', 1;
+          END
 
           DECLARE @OAuthTokenId UNIQUEIDENTIFIER = TRY_CONVERT(UNIQUEIDENTIFIER, @OAuthJti);
           DECLARE @OAuthEmailAtual NVARCHAR(300) = NULL;
@@ -440,22 +519,29 @@ export const pacientesService = {
               THROW 50124, N'OAUTH_IDENTITY_ALREADY_LINKED', 1;
           END
 
+          DECLARE @NovoId TABLE (Id INT);
+
           INSERT INTO dbo.Pacientes
           (Nome, CPF, Email, Telefone, DataNascimento, SenhaHash,
           CPFValido,
+          EmailVerificado, EmailVerificadoEm,
+          TelefoneVerificado, TelefoneVerificadoEm,
           Cidade, Estado, Naturalidade, EstadoCivil, Genero, Profissao,
           EnderecoComercial, EnderecoResidencial, Cep, CepComercial,
           BairroResidencial, BairroComercial,
           ComplementoResidencial, ComplementoComercial)
+        OUTPUT INSERTED.Id INTO @NovoId(Id)
         VALUES
           (@Nome, @CPF, @Email, @Telefone, @DataNascimento, @SenhaHash,
           @CPFValido,
+          @ContatosPrevalidados, CASE WHEN @ContatosPrevalidados = 1 THEN SYSDATETIME() ELSE NULL END,
+          @ContatosPrevalidados, CASE WHEN @ContatosPrevalidados = 1 THEN SYSDATETIME() ELSE NULL END,
           @Cidade, @Estado, @Naturalidade, @EstadoCivil, @Genero, @Profissao,
           @EnderecoComercial, @EnderecoResidencial, @Cep, @CepComercial,
           @BairroResidencial, @BairroComercial,
           @ComplementoResidencial, @ComplementoComercial);
 
-          DECLARE @NewId INT = CAST(SCOPE_IDENTITY() AS INT);
+          DECLARE @NewId INT = (SELECT TOP (1) Id FROM @NovoId);
 
           IF @OAuthJti IS NOT NULL
           BEGIN
@@ -474,6 +560,21 @@ export const pacientesService = {
 
             IF @@ROWCOUNT <> 1
               THROW 50123, N'OAUTH_SIGNUP_TOKEN_USED', 1;
+          END
+
+          IF @ContatosPrevalidados = 1
+          BEGIN
+            UPDATE dbo.PacienteCadastroSessoes
+            SET Status = N'Consumido',
+                ConsumidoEm = SYSDATETIME(),
+                PacienteId = @NewId,
+                AtualizadoEm = SYSDATETIME()
+            WHERE Id = @CadastroSessaoId
+              AND Status = N'ContatosConfirmados'
+              AND ConsumidoEm IS NULL;
+
+            IF @@ROWCOUNT <> 1
+              THROW 50402, N'CADASTRO_SESSION_CONSUMED', 1;
           END
 
           COMMIT;
@@ -520,33 +621,40 @@ export const pacientesService = {
       );
 
       const novo = result.recordset?.[0] || null;
-      if (novo) delete novo.SenhaHash;
-      if (novo?.Id) {
-        novo.verificacaoEmailEnviada = false;
+      if (!Number.isInteger(Number(novo?.Id)) || Number(novo.Id) <= 0) {
+        throw httpError('Não foi possível identificar o paciente criado.', 500);
+      }
+      delete novo.SenhaHash;
+      novo.verificacaoEmailEnviada = false;
+      novo.contatosPrevalidados = contatosPrevalidados;
+
+      if (!contatosPrevalidados) {
         void solicitarVerificacaoContatoInterna({
-            usuarioTipo: 'Paciente',
-            usuarioId: novo.Id,
-            canal: 'Email',
-            expiraEmMinutos: 10,
-            montarConteudo: ({ codigo, usuario, expiraEmMinutos }) => montarEmailVerificacaoPaciente({
-              nome: usuario?.Nome || novo.Nome,
-              codigo,
-              expiraEmMinutos,
-            }),
+          usuarioTipo: 'Paciente',
+          usuarioId: novo.Id,
+          usuario: { id: novo.Id, tipo: 'Paciente' },
+          canal: 'Email',
+          expiraEmMinutos: 10,
+          montarConteudo: ({ codigo, usuario, expiraEmMinutos }) => montarEmailVerificacaoPaciente({
+            nome: usuario?.Nome || novo.Nome,
+            codigo,
+            expiraEmMinutos,
+          }),
         })
           .then((verificacao) => {
-            log('info', 'Verificação de e-mail solicitada no cadastro de paciente', {
+            log('info', 'Verificação de e-mail solicitada no cadastro legado de paciente', {
               pacienteId: novo.Id,
               destino: verificacao?.destinoMascarado,
             });
           })
           .catch((err) => {
-          log('warn', 'Falha ao enviar e-mail de verificação no cadastro de paciente', {
-            pacienteId: novo.Id,
-            erro: err?.message,
-          });
+            log('warn', 'Falha ao enviar e-mail de verificação no cadastro legado de paciente', {
+              pacienteId: novo.Id,
+              erro: err?.message,
+            });
           });
       }
+
       return novo;
     } catch (e) {
       throw mapUniqueError(e);
@@ -821,7 +929,53 @@ export const pacientesService = {
     }
   },
 
-  // Confiabilidade
+  async obterStatusVerificacaoContato(pacienteId, usuario = null) {
+    const id = Number(pacienteId);
+    if (!Number.isInteger(id) || id <= 0) throw httpError('Paciente inválido.', 400);
+    const ctx = usuario || { id, tipo: 'Paciente' };
+    const result = await queryWithContext(
+      ctx,
+      (req) => req.input('Id', sql.Int, id),
+      `
+        SELECT TOP (1)
+          Id, Email, Telefone, EmailVerificado, TelefoneVerificado
+        FROM dbo.Pacientes
+        WHERE Id = @Id;
+      `,
+      { requireContext: true }
+    );
+    const row = result.recordset?.[0];
+    if (!row) return null;
+
+    const emailVerificado = Number(row.EmailVerificado ?? 0) === 1;
+    const telefoneVerificado = Number(row.TelefoneVerificado ?? 0) === 1;
+    const gateMode = ENV.PACIENTE_LOGIN_CONTATO_GATE_MODE;
+    const pendenciasObrigatorias = [];
+    if (gateMode !== 'off' && !emailVerificado) pendenciasObrigatorias.push('Email');
+    if (gateMode === 'email_phone' && !telefoneVerificado) pendenciasObrigatorias.push('Telefone');
+
+    const telefoneDigits = String(row.Telefone || '').replace(/\D/g, '');
+    const emailDestino = normalizeEmail(row.Email);
+
+    return {
+      email: {
+        verificado: emailVerificado,
+        destinoMascarado: contatoProvider.mascararDestino('Email', emailDestino),
+        podeVerificar: isValidEmail(emailDestino),
+      },
+      telefone: {
+        verificado: telefoneVerificado,
+        destinoMascarado: contatoProvider.mascararDestino('Telefone', row.Telefone),
+        podeVerificar: telefoneDigits.length === 10 || telefoneDigits.length === 11 ||
+          (telefoneDigits.startsWith('55') && (telefoneDigits.length === 12 || telefoneDigits.length === 13)),
+      },
+      contatosVerificados: emailVerificado && telefoneVerificado,
+      gateMode,
+      pendenciasObrigatorias,
+      gateObrigatorio: pendenciasObrigatorias.length > 0,
+    };
+  },
+
   async obterConfiabilidade(usuario, id) {
     const pid = toInt(id);
     if (!pid) throw httpError('Id inválido.', 400);

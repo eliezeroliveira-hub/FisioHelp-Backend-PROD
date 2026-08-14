@@ -13,6 +13,7 @@ router.post('/ativar-pre-cadastro', pacientesController.ativarPreCadastro);
 // A partir daqui, tudo exige autenticação (garante req.usuario)
 router.use(autenticarJWT);
 
+router.get('/me/status-verificacao', verificarPermissao(['Paciente']), pacientesController.statusVerificacaoMe);
 router.get('/:id/confiabilidade', verificarPermissao(['Paciente']), pacientesController.confiabilidade);
 
 // Verificação de contato (Email/Telefone)

@@ -112,6 +112,52 @@ Equipe FisioHelp`;
   return montarShell({ assunto, conteudoHtml, conteudoTexto });
 }
 
+export function montarEmailVerificacaoCadastroPaciente({ nome, codigo, expiraEmMinutos = 10 } = {}) {
+  const nomePaciente = primeiroNome(nome, 'Paciente');
+  const expiracao = formatarExpiracao(expiraEmMinutos);
+  const assunto = 'Confirme seu e-mail para continuar seu cadastro na FisioHelp';
+
+  const conteudoHtml = `
+    <h1 style="margin:0 0 18px 0;color:#3D2B22;font-size:22px;line-height:1.3;font-weight:700;">${escapeHtml(assunto)}</h1>
+    ${paragrafoHtml(`Olá, ${nomePaciente},`)}
+    ${paragrafoHtml('Use o código abaixo na etapa de validação do cadastro de paciente:')}
+    ${blocoCodigoHtml('Código de verificação', codigo)}
+    ${paragrafoHtml(`Este código expira em ${expiracao}.`)}
+    ${paragrafoHtml('Não compartilhe este código. A FisioHelp nunca solicitará esse código por ligação ou mensagem.')}
+    ${paragrafoHtml('Se você não iniciou este cadastro, ignore a mensagem ou entre em contato pelo e-mail suporte@fisiohelp.com.br.')}
+    ${paragrafoHtml('Atenciosamente,')}
+    ${paragrafoHtml('Equipe FisioHelp')}`;
+
+  const conteudoTexto = `Olá, ${nomePaciente},
+
+Use o código abaixo na etapa de validação do cadastro de paciente:
+
+Código de verificação: ${codigo}
+
+Este código expira em ${expiracao}.
+
+Não compartilhe este código. A FisioHelp nunca solicitará esse código por ligação ou mensagem.
+
+Se você não iniciou este cadastro, ignore a mensagem ou entre em contato pelo e-mail suporte@fisiohelp.com.br.
+
+Atenciosamente,
+Equipe FisioHelp`;
+
+  return montarShell({ assunto, conteudoHtml, conteudoTexto });
+}
+
+export function montarTextoTelefoneVerificacaoCadastroPaciente({ codigo, expiraEmMinutos = 10 } = {}) {
+  return [
+    `Seu código de verificação FisioHelp é: ${texto(codigo)}`,
+    '',
+    'Digite este código na etapa de validação do cadastro de paciente.',
+    '',
+    `Este código expira em ${formatarExpiracao(expiraEmMinutos)}.`,
+    '',
+    'Não compartilhe este código.',
+  ].join('\n');
+}
+
 export function montarEmailVerificacaoCadastroFisioterapeuta({ nome, codigo, expiraEmMinutos = 10 } = {}) {
   const nomeFisioterapeuta = primeiroNome(nome, 'Fisioterapeuta');
   const expiracao = formatarExpiracao(expiraEmMinutos);
@@ -231,6 +277,8 @@ Equipe FisioHelp`;
 
 export default {
   montarEmailVerificacaoPaciente,
+  montarEmailVerificacaoCadastroPaciente,
+  montarTextoTelefoneVerificacaoCadastroPaciente,
   montarEmailVerificacaoFisioterapeuta,
   montarEmailVerificacaoCadastroFisioterapeuta,
   montarTextoTelefoneVerificacaoCadastroFisioterapeuta,

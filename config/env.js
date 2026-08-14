@@ -132,6 +132,18 @@ const fisioLoginContatoGateMode = parseModeEnv(
 );
 const fisioCadastroEmailDailyMax = parsePositiveIntEnv('FISIO_CADASTRO_EMAIL_DAILY_MAX', 10);
 const fisioCadastroTelefoneDailyMax = parsePositiveIntEnv('FISIO_CADASTRO_TELEFONE_DAILY_MAX', 6);
+const pacienteCadastroContatoPrevalidacaoMode = parseModeEnv(
+  'PACIENTE_CADASTRO_CONTATO_PREVALIDACAO_MODE',
+  'optional',
+  ['optional', 'required']
+);
+const pacienteLoginContatoGateMode = parseModeEnv(
+  'PACIENTE_LOGIN_CONTATO_GATE_MODE',
+  'off',
+  ['off', 'email', 'email_phone']
+);
+const pacienteCadastroEmailDailyMax = parsePositiveIntEnv('PACIENTE_CADASTRO_EMAIL_DAILY_MAX', 10);
+const pacienteCadastroTelefoneDailyMax = parsePositiveIntEnv('PACIENTE_CADASTRO_TELEFONE_DAILY_MAX', 6);
 
 /**
  * Variáveis globais do ambiente
@@ -159,6 +171,10 @@ export const ENV = {
   FISIO_LOGIN_CONTATO_GATE_MODE: fisioLoginContatoGateMode,
   FISIO_CADASTRO_EMAIL_DAILY_MAX: fisioCadastroEmailDailyMax,
   FISIO_CADASTRO_TELEFONE_DAILY_MAX: fisioCadastroTelefoneDailyMax,
+  PACIENTE_CADASTRO_CONTATO_PREVALIDACAO_MODE: pacienteCadastroContatoPrevalidacaoMode,
+  PACIENTE_LOGIN_CONTATO_GATE_MODE: pacienteLoginContatoGateMode,
+  PACIENTE_CADASTRO_EMAIL_DAILY_MAX: pacienteCadastroEmailDailyMax,
+  PACIENTE_CADASTRO_TELEFONE_DAILY_MAX: pacienteCadastroTelefoneDailyMax,
 
   // Logs e informações gerais
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',

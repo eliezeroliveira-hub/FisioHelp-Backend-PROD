@@ -33,6 +33,21 @@ const fisioCadastroTelefoneWindowMs = parsePositiveInt(
   60 * 60 * 1000
 );
 const fisioCadastroTelefoneMax = parsePositiveInt(process.env.FISIO_CADASTRO_TELEFONE_RATE_LIMIT_MAX, 4);
+const pacienteCadastroContatoIpWindowMs = parsePositiveInt(
+  process.env.PACIENTE_CADASTRO_CONTATO_IP_RATE_LIMIT_WINDOW_MS,
+  15 * 60 * 1000
+);
+const pacienteCadastroContatoIpMax = parsePositiveInt(process.env.PACIENTE_CADASTRO_CONTATO_IP_RATE_LIMIT_MAX, 20);
+const pacienteCadastroEmailWindowMs = parsePositiveInt(
+  process.env.PACIENTE_CADASTRO_EMAIL_RATE_LIMIT_WINDOW_MS,
+  30 * 60 * 1000
+);
+const pacienteCadastroEmailMax = parsePositiveInt(process.env.PACIENTE_CADASTRO_EMAIL_RATE_LIMIT_MAX, 5);
+const pacienteCadastroTelefoneWindowMs = parsePositiveInt(
+  process.env.PACIENTE_CADASTRO_TELEFONE_RATE_LIMIT_WINDOW_MS,
+  60 * 60 * 1000
+);
+const pacienteCadastroTelefoneMax = parsePositiveInt(process.env.PACIENTE_CADASTRO_TELEFONE_RATE_LIMIT_MAX, 4);
 
 function normalizarEmailRateLimit(value) {
   return String(value || '').trim().toLowerCase();
@@ -133,6 +148,37 @@ export const cadastroFisioTelefoneLimiter = rateLimit({
     const telefone = normalizarTelefoneRateLimit(req.body?.Telefone ?? req.body?.telefone);
     const sessao = String(req.body?.CadastroValidacaoId ?? req.body?.cadastroValidacaoId ?? '').trim().toLowerCase();
     return `fisio-telefone:${telefone || sessao || 'nao-informado'}`;
+  },
+  message: { erro: 'Muitas solicitações para este telefone. Tente novamente mais tarde.' }
+});
+
+export const cadastroPacienteContatoIpLimiter = rateLimit({
+  windowMs: pacienteCadastroContatoIpWindowMs,
+  max: pacienteCadastroContatoIpMax,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: rateLimitKeyByIp,
+  message: { erro: 'Muitas tentativas de validação. Tente novamente em alguns minutos.' }
+});
+
+export const cadastroPacienteEmailLimiter = rateLimit({
+  windowMs: pacienteCadastroEmailWindowMs,
+  max: pacienteCadastroEmailMax,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `paciente-email:${normalizarEmailRateLimit(req.body?.Email ?? req.body?.email) || 'nao-informado'}`,
+  message: { erro: 'Muitas solicitações para este e-mail. Tente novamente mais tarde.' }
+});
+
+export const cadastroPacienteTelefoneLimiter = rateLimit({
+  windowMs: pacienteCadastroTelefoneWindowMs,
+  max: pacienteCadastroTelefoneMax,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const telefone = normalizarTelefoneRateLimit(req.body?.Telefone ?? req.body?.telefone);
+    const sessao = String(req.body?.CadastroValidacaoId ?? req.body?.cadastroValidacaoId ?? '').trim().toLowerCase();
+    return `paciente-telefone:${telefone || sessao || 'nao-informado'}`;
   },
   message: { erro: 'Muitas solicitações para este telefone. Tente novamente mais tarde.' }
 });

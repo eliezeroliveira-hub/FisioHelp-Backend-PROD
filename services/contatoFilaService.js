@@ -159,6 +159,43 @@ async function verificacaoCadastroFisioterapeutaAindaPendente(item, payload, usu
   return Boolean(result?.recordset?.[0]?.Id);
 }
 
+async function verificacaoCadastroPacienteAindaPendente(item, payload, usuario = null) {
+  const cadastroSessaoId = String(payload?.cadastroSessaoId || '').trim().toLowerCase();
+  const codigoHashHex = String(payload?.codigoHashHex || '').trim().toLowerCase();
+  const canal = normalizarCanal(item?.Canal);
+  const destino = text(item?.Destino, 255);
+
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cadastroSessaoId) ||
+    !/^[a-f0-9]{64}$/.test(codigoHashHex) ||
+    !destino
+  ) {
+    throw new Error('Payload inválido para verificação de pré-cadastro.');
+  }
+
+  const codigoHash = Buffer.from(codigoHashHex, 'hex');
+  const result = await queryWithContext(safeUser(usuario), (req) => {
+    req.input('CadastroSessaoId', sql.UniqueIdentifier, cadastroSessaoId);
+    req.input('Canal', sql.NVarChar(20), canal);
+    req.input('Destino', sql.NVarChar(300), destino);
+    req.input('CodigoHash', sql.VarBinary(32), codigoHash);
+  }, `
+    SELECT TOP (1) v.Id
+    FROM dbo.PacienteCadastroVerificacoes v
+    INNER JOIN dbo.PacienteCadastroSessoes s ON s.Id = v.CadastroSessaoId
+    WHERE v.CadastroSessaoId = @CadastroSessaoId
+      AND v.Canal = @Canal
+      AND v.DestinoNormalizado = @Destino
+      AND v.CodigoHash = @CodigoHash
+      AND v.Status = N'Pendente'
+      AND v.ExpiraEm > SYSDATETIME()
+      AND s.Status = N'EmAndamento'
+      AND s.ExpiraEm > SYSDATETIME();
+  `);
+
+  return Boolean(result?.recordset?.[0]?.Id);
+}
+
 export async function filaDisponivel(usuario = null) {
   const ctx = safeUser(usuario);
   const result = await queryWithContext(ctx, () => {}, `
@@ -329,6 +366,15 @@ export async function processarItem(item, usuario = null) {
 
   if (tipo === 'VerificacaoCadastroFisioterapeuta') {
     const aindaPendente = await verificacaoCadastroFisioterapeutaAindaPendente(item, payload, usuario);
+    if (!aindaPendente) {
+      const resultadoIgnorado = { ok: true, ignorado: true, motivo: 'codigo_substituido_ou_expirado' };
+      await marcarProcessado(item, resultadoIgnorado, usuario);
+      return resultadoIgnorado;
+    }
+  }
+
+  if (tipo === 'VerificacaoCadastroPaciente') {
+    const aindaPendente = await verificacaoCadastroPacienteAindaPendente(item, payload, usuario);
     if (!aindaPendente) {
       const resultadoIgnorado = { ok: true, ignorado: true, motivo: 'codigo_substituido_ou_expirado' };
       await marcarProcessado(item, resultadoIgnorado, usuario);

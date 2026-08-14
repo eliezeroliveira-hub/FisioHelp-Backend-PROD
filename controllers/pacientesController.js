@@ -134,6 +134,25 @@ const pacientesController = {
     }
   },
   
+  async statusVerificacaoMe(req, res) {
+    try {
+      const id = Number(req.usuario?.id);
+      if (!id || req.usuario?.tipo !== 'Paciente') {
+        return res.status(403).json({ sucesso: false, erro: 'Acesso negado.' });
+      }
+      const status = await pacientesService.obterStatusVerificacaoContato(id, {
+        id,
+        tipo: 'Paciente',
+      });
+      if (!status) {
+        return res.status(404).json({ sucesso: false, erro: 'Paciente não encontrado.' });
+      }
+      return res.json({ sucesso: true, ...status });
+    } catch (error) {
+      return handleError(res, error, 500, 'Erro ao consultar a validação da conta.');
+    }
+  },
+
   async solicitarVerificacaoContato(req, res) {
     try {
       if (!req.usuario) return res.status(401).json({ sucesso: false, erro: 'Não autenticado.' });
