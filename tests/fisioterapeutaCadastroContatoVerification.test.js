@@ -39,9 +39,12 @@ test('prova fica vinculada à sessão, CREFITO, e-mail e telefone', () => {
 });
 
 test('criação consome a sessão na mesma transação e grava os dois contatos verificados', () => {
-  const begin = fisioterapeutasService.indexOf('BEGIN TRY\n          BEGIN TRAN;', fisioterapeutasService.indexOf('async criar'));
-  const commit = fisioterapeutasService.indexOf('COMMIT;', begin);
-  const block = fisioterapeutasService.slice(begin, commit);
+  const criar = fisioterapeutasService.slice(fisioterapeutasService.indexOf('async criar'));
+  const begin = criar.search(/BEGIN TRY\r?\n\s+BEGIN TRAN;/);
+  const commit = criar.indexOf('COMMIT;', begin);
+  assert.ok(begin >= 0, 'bloco transacional do cadastro não localizado');
+  assert.ok(commit > begin, 'commit do cadastro não localizado');
+  const block = criar.slice(begin, commit);
   assert.match(block, /WITH \(UPDLOCK, HOLDLOCK\)/);
   assert.match(block, /EmailVerificado, EmailVerificadoEm/);
   assert.match(block, /TelefoneVerificado, TelefoneVerificadoEm/);
