@@ -1,6 +1,15 @@
 // 📁 controllers/agendaController.js
 import agendaService from '../services/agendaService.js';
+import { invalidarCalendarioFisioterapeuta } from '../services/calendarioDisponibilidadeCache.js';
 import { HttpError } from '../utils/httpError.js';
+
+function invalidarCalendarioDoUsuario(usuario, reason) {
+  const fisioterapeutaId = Number(
+    usuario?.id ?? usuario?.usuarioId ?? usuario?.UsuarioId
+  );
+  if (!Number.isInteger(fisioterapeutaId) || fisioterapeutaId <= 0) return;
+  invalidarCalendarioFisioterapeuta(fisioterapeutaId, reason);
+}
 
 function getSqlMessage(err) {
   return (
@@ -100,6 +109,7 @@ const agendaController = {
   async criarAgenda(req, res) {
     try {
       const item = await agendaService.criarAgenda(req.usuario, req.body || {});
+      invalidarCalendarioDoUsuario(req.usuario, 'agenda:create');
       return res.status(201).json({ sucesso: true, item });
     } catch (err) {
       return handleError(res, err);
@@ -109,6 +119,7 @@ const agendaController = {
   async atualizarAgenda(req, res) {
     try {
       const item = await agendaService.atualizarAgenda(req.usuario, req.params.id, req.body || {});
+      invalidarCalendarioDoUsuario(req.usuario, 'agenda:update');
       return res.json({ sucesso: true, item });
     } catch (err) {
       return handleError(res, err);
@@ -122,6 +133,7 @@ const agendaController = {
       if (String(validarApenas ?? '').trim()) {
         return res.json({ sucesso: true, podeRemover: !!result?.podeRemover, item: result?.item ?? null });
       }
+      invalidarCalendarioDoUsuario(req.usuario, 'agenda:delete');
       return res.json({ sucesso: true, removido: result });
     } catch (err) {
       return handleError(res, err);
@@ -165,6 +177,7 @@ const agendaController = {
   async criarExcecao(req, res) {
     try {
       const item = await agendaService.criarExcecao(req.usuario, req.body || {});
+      invalidarCalendarioDoUsuario(req.usuario, 'exception:create');
       return res.status(201).json({ sucesso: true, item });
     } catch (err) {
       return handleError(res, err);
@@ -174,6 +187,7 @@ const agendaController = {
   async atualizarExcecao(req, res) {
     try {
       const item = await agendaService.atualizarExcecao(req.usuario, req.params.id, req.body || {});
+      invalidarCalendarioDoUsuario(req.usuario, 'exception:update');
       return res.json({ sucesso: true, item });
     } catch (err) {
       return handleError(res, err);
@@ -183,6 +197,7 @@ const agendaController = {
   async excluirExcecao(req, res) {
     try {
       const removido = await agendaService.excluirExcecao(req.usuario, req.params.id);
+      invalidarCalendarioDoUsuario(req.usuario, 'exception:delete');
       return res.json({ sucesso: true, removido });
     } catch (err) {
       return handleError(res, err);
@@ -192,6 +207,7 @@ const agendaController = {
   async criarBloqueio(req, res) {
     try {
       const item = await agendaService.criarBloqueio(req.usuario, req.body || {});
+      invalidarCalendarioDoUsuario(req.usuario, 'block:create');
       return res.status(201).json({ sucesso: true, item });
     } catch (err) {
       return handleError(res, err);
@@ -201,6 +217,7 @@ const agendaController = {
   async atualizarBloqueio(req, res) {
     try {
       const item = await agendaService.atualizarBloqueio(req.usuario, req.params.id, req.body || {});
+      invalidarCalendarioDoUsuario(req.usuario, 'block:update');
       return res.json({ sucesso: true, item });
     } catch (err) {
       return handleError(res, err);
@@ -214,6 +231,7 @@ const agendaController = {
       if (String(validarApenas ?? '').trim()) {
         return res.json({ sucesso: true, podeRemover: !!result?.podeRemover, item: result?.item ?? null });
       }
+      invalidarCalendarioDoUsuario(req.usuario, 'block:delete');
       return res.json({ sucesso: true, removido: result });
     } catch (err) {
       return handleError(res, err);

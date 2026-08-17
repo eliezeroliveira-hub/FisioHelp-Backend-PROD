@@ -2,6 +2,7 @@
 import PDFDocument from 'pdfkit';
 import { sql } from '../config/dbConfig.js';
 import { queryWithContext } from './_queryWithContext.js';
+import { invalidarCalendarioFisioterapeuta } from './calendarioDisponibilidadeCache.js';
 import { registrarCancelamentoLog } from './cancelamentosLogService.js';
 import { reconciliarCreditoPacoteDisponivelPorConsulta } from './_reconciliarCreditoPacoteDisponivel.js';
 import reembolsosGatewayFilaService from './reembolsosGatewayFilaService.js';
@@ -41,6 +42,21 @@ function assertId(value, label) {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) throw new HttpError(400, `${label} inválido.`);
   return n;
+}
+
+function invalidarCalendarioDaConsulta(consulta, reason) {
+  const fisioterapeutaId = Number(consulta?.FisioterapeutaId);
+  if (!Number.isInteger(fisioterapeutaId) || fisioterapeutaId <= 0) return;
+
+  try {
+    invalidarCalendarioFisioterapeuta(fisioterapeutaId, reason);
+  } catch (error) {
+    log('warn', 'Falha ao invalidar cache do calendario depois de alterar consulta.', {
+      fisioterapeutaId,
+      reason,
+      erro: error?.message || String(error),
+    });
+  }
 }
 
 // Converte uma string ISO (com ou sem offset) para um Date em UTC, mantendo o "wall time".
@@ -2451,6 +2467,7 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
       void notificacoesDispatch.consultaAgendada({ consultaId: novoId });
     }
 
+    invalidarCalendarioDaConsulta(consultaOut, 'consultation:create');
     return { sucesso: true, consulta: consultaOut };
   },
 
@@ -2885,6 +2902,7 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
       Plataforma: 'Consulta criada. Continue para o checkout seguro da plataforma.'
     };
 
+    invalidarCalendarioDaConsulta(consulta, 'consultation:create-and-pay');
     return {
       consulta,
       retorno: {
@@ -2989,7 +3007,9 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
       };
 
       // Reaproveita o fluxo correto de arrependimento para consultas pagas.
-      return await this.cancelarArrependimento7Dias(id, body, usuario);
+      const resultado = await this.cancelarArrependimento7Dias(id, body, usuario);
+      invalidarCalendarioDaConsulta(existente, 'consultation:cancel-paid');
+      return resultado;
     }
 
     const statusAtual = String(existente.Status || '').trim();
@@ -3044,6 +3064,7 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
 
     void notificacoesDispatch.consultaCancelada({ consultaId: id, motivo, origem: 'paciente' });
 
+    invalidarCalendarioDaConsulta(existente, 'consultation:cancel-patient');
     return {
       consulta,
       retorno: {
@@ -3155,6 +3176,7 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
 
     void notificacoesDispatch.fisioterapeutaAusente({ consultaId: id });
 
+    invalidarCalendarioDaConsulta(existente, 'consultation:cancel-physiotherapist');
     return {
       consulta,
       retorno: {
@@ -3198,6 +3220,7 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
 
   void notificacoesDispatch.consultaCancelada({ consultaId: id, motivo, origem: 'admin' });
 
+  invalidarCalendarioDaConsulta(existente, 'consultation:cancel-admin');
   return { consulta, retorno: null };
 },
 
@@ -3386,6 +3409,7 @@ async reagendar(consultaId, body, usuario) {
     });
   }
 
+  invalidarCalendarioDaConsulta(c, 'consultation:reschedule');
   // Compatibilidade:
   // - fluxo antigo: retorna { ConsultaId, DataHoraAnterior, DataHoraNova }
   // - no-show fisio (novo): retorna { ConsultaOriginalId, NovaConsultaId, ... }
@@ -3420,6 +3444,7 @@ async reagendar(consultaId, body, usuario) {
       req.input('PacienteId', sql.Int, Number(usuario.id));
     }, `
       SELECT TOP (1)
+        c.FisioterapeutaId,
         c.Status,
         c.StatusPagamento,
         ISNULL(c.PagamentoViaPlataforma, 0) AS PagamentoViaPlataforma,
@@ -3450,6 +3475,8 @@ async reagendar(consultaId, body, usuario) {
     if (!pagamentoCtx) {
       throw new HttpError(404, 'Consulta não encontrada para este paciente.');
     }
+
+    try {
 
     const pagamentoViaPlataforma = Number(pagamentoCtx.PagamentoViaPlataforma ?? 0) === 1;
     const statusConsultaAtual = String(pagamentoCtx.Status || '').trim();
@@ -3679,6 +3706,9 @@ async reagendar(consultaId, body, usuario) {
       SemReembolso: row?.SemReembolso ?? false,
       Mensagem: row?.Mensagem ?? null
     };
+    } finally {
+      invalidarCalendarioDaConsulta(pagamentoCtx, 'consultation:cancel-refund-flow');
+    }
 
   },
 

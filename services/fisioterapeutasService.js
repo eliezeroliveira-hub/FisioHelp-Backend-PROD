@@ -5,6 +5,7 @@ import path from 'path';
 import { sql } from '../config/dbConfig.js';
 import { log } from '../config/logger.js';
 import { queryWithContext } from './_queryWithContext.js';
+import { calendarioDisponibilidadeCache } from './calendarioDisponibilidadeCache.js';
 import { ENV } from '../config/env.js';
 import { obterPendenciaAvaliacaoFisioterapeuta } from './avaliacoesService.js';
 import {
@@ -877,6 +878,12 @@ const fisioterapeutasService = {
     if (!Number.isInteger(y) || y < 2020 || y > 2100) throw new HttpError(400, 'Ano inválido.');
     if (!Number.isInteger(m) || m < 1 || m > 12) throw new HttpError(400, 'Mês inválido.');
 
+    return calendarioDisponibilidadeCache.getOrLoad({
+      fisioterapeutaId: id,
+      ano: y,
+      mes: m,
+      loader: async () => {
+
     const crefitoCheck = await queryWithContext(
       safeUsuario(usuario),
       (req) => req.input('FisioterapeutaId', sql.Int, id),
@@ -1076,6 +1083,8 @@ const fisioterapeutasService = {
       },
       Dias: dias
     };
+      },
+    });
   },
 
   //  Perfil completo (pensado para área logada)

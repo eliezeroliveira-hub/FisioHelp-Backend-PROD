@@ -144,6 +144,13 @@ const pacienteLoginContatoGateMode = parseModeEnv(
 );
 const pacienteCadastroEmailDailyMax = parsePositiveIntEnv('PACIENTE_CADASTRO_EMAIL_DAILY_MAX', 10);
 const pacienteCadastroTelefoneDailyMax = parsePositiveIntEnv('PACIENTE_CADASTRO_TELEFONE_DAILY_MAX', 6);
+const calendarioPublicoCacheMode = parseModeEnv(
+  'CALENDARIO_PUBLICO_CACHE_MODE',
+  'off',
+  ['off', 'memory']
+);
+const calendarioPublicoCacheTtlMs = parsePositiveIntEnv('CALENDARIO_PUBLICO_CACHE_TTL_MS', 15000);
+const calendarioPublicoCacheMaxEntries = parsePositiveIntEnv('CALENDARIO_PUBLICO_CACHE_MAX_ENTRIES', 500);
 
 /**
  * Variáveis globais do ambiente
@@ -175,6 +182,9 @@ export const ENV = {
   PACIENTE_LOGIN_CONTATO_GATE_MODE: pacienteLoginContatoGateMode,
   PACIENTE_CADASTRO_EMAIL_DAILY_MAX: pacienteCadastroEmailDailyMax,
   PACIENTE_CADASTRO_TELEFONE_DAILY_MAX: pacienteCadastroTelefoneDailyMax,
+  CALENDARIO_PUBLICO_CACHE_MODE: calendarioPublicoCacheMode,
+  CALENDARIO_PUBLICO_CACHE_TTL_MS: calendarioPublicoCacheTtlMs,
+  CALENDARIO_PUBLICO_CACHE_MAX_ENTRIES: calendarioPublicoCacheMaxEntries,
 
   // Logs e informações gerais
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',
