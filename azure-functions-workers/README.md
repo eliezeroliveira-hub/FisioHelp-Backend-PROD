@@ -12,6 +12,7 @@ Este pacote e separado do Function App de SQL jobs em `azure-functions/`.
 - `enfileirarAvaliacoesPendentes`: chama `workers/avaliacoesPendentesWorker.tick()`.
 - `enfileirarLembretesConsulta`: chama `workers/consultasLembretesWorker.tick()`.
 - `enfileirarLembretePerfilFisioterapeuta`: chama `workers/perfilFisioterapeutaLembreteWorker.tick()` a cada 15 minutos.
+- `enfileirarProgramaIndicacaoFisioterapeuta`: chama workers/programaIndicacaoFisioterapeutaWorker.tick() no primeiro dia de cada mês, às 12:00 UTC (09:00 em São Paulo).
 
 ## Deploy
 
@@ -52,3 +53,17 @@ dentro do proprio `tick()` e permanece inativo por padrao. Configuracoes:
 
 Para um teste controlado em HML, defina `PERFIL_LEMBRETE_FISIOTERAPEUTA_ID` com o ID
 do fisioterapeuta. Remova a configuracao ao voltar ao processamento geral.
+
+O fluxo `enfileirarProgramaIndicacaoFisioterapeuta` valida a flag de ativação dentro do
+próprio `tick()` e usa uma chave idempotente por fisioterapeuta, canal e competência
+`AAAA-MM`. Configurações:
+
+- `PROGRAMA_INDICACAO_WORKER_ENABLED=false`
+- `PROGRAMA_INDICACAO_BATCH_SIZE=50`
+- `PROGRAMA_INDICACAO_MAX_BATCHES=20`
+- `PROGRAMA_INDICACAO_FISIOTERAPEUTA_ID=` (opcional; obrigatório no teste controlado de HML)
+- `PROGRAMA_INDICACAO_LANCAMENTO_COMPETENCIA=` (opcional; permite somente o lançamento fora do primeiro dia)
+
+A Function usa `runOnStartup`, mas o worker só executa no primeiro dia do mês ou quando
+a competência de lançamento coincide com o mês atual. Remova a competência de lançamento
+após confirmar o envio inaugural.

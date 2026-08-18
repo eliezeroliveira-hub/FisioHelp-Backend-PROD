@@ -687,6 +687,7 @@ async function processarEmailItem(item, usuario = null) {
       assunto: template.assunto,
       corpoHtml: template.corpoHtml,
       corpoTexto: template.corpoTexto,
+      anexos: template.anexos,
     });
   } catch (erro) {
     resultado = {

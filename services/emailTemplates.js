@@ -1,4 +1,5 @@
 import { montarEmailLembretePerfilFisioterapeuta } from './perfilFisioterapeutaEmailTemplate.js';
+import { montarEmailProgramaIndicacaoFisioterapeuta } from './programaIndicacaoEmailTemplate.js';
 import { montarDocumentoProfissionalApresentacao } from '../utils/professionalDocumentPresentation.js';
 
 const FOOTER = 'Mensagem automática — esta caixa não é monitorada. Fale com suporte@fisiohelp.com.br.';
@@ -491,6 +492,13 @@ Equipe FisioHelp`;
 }
 
 export function montarEmailNotificacao({ titulo, mensagem, dados = null } = {}) {
+  if (dados?.emailModelo === 'programa_indicacao_fisioterapeuta') {
+    return montarEmailProgramaIndicacaoFisioterapeuta({
+      nomeFisioterapeuta: dados?.fisioterapeutaNome,
+      variacao: dados?.variacao,
+    });
+  }
+
   if (dados?.emailModelo === 'lembrete_perfil_fisioterapeuta') {
     return montarEmailLembretePerfilFisioterapeuta({
       nomeFisioterapeuta: dados?.fisioterapeutaNome,

@@ -154,10 +154,55 @@ async function aguardarAcs(poller, { timeoutMs = 180_000, intervalMs = 10_000 } 
   return poller.getResult();
 }
 
+function prepararAnexos(anexos) {
+  if (anexos === null || anexos === undefined) return [];
+  if (!Array.isArray(anexos)) {
+    throw new Error('Anexos de e-mail devem ser uma lista.');
+  }
+
+  const normalizados = anexos.map((anexo, index) => {
+    const name = String(anexo?.name || '').replace(/[\r\n]+/g, ' ').trim();
+    const contentType = String(anexo?.contentType || '').trim().toLowerCase();
+    const contentInBase64 = String(anexo?.contentInBase64 || '').trim();
+    const contentIdRaw = String(anexo?.contentId || '').trim();
+
+    if (!name || name.length > 255) {
+      throw new Error(`Nome inválido no anexo de e-mail ${index + 1}.`);
+    }
+    if (!/^[a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*$/i.test(contentType)) {
+      throw new Error(`Content-Type inválido no anexo de e-mail ${index + 1}.`);
+    }
+    if (!contentInBase64) {
+      throw new Error(`Conteúdo ausente no anexo de e-mail ${index + 1}.`);
+    }
+    if (contentIdRaw && !/^[A-Za-z0-9._-]{1,120}$/.test(contentIdRaw)) {
+      throw new Error(`Content-ID inválido no anexo de e-mail ${index + 1}.`);
+    }
+
+    return {
+      name,
+      contentType,
+      contentInBase64,
+      contentId: contentIdRaw || undefined,
+    };
+  });
+
+  const totalBytesAproximado = normalizados.reduce(
+    (total, anexo) => total + Math.ceil((anexo.contentInBase64.length * 3) / 4),
+    0
+  );
+  if (totalBytesAproximado > 8 * 1024 * 1024) {
+    throw new Error('Anexos de e-mail excedem o limite seguro de 8 MB.');
+  }
+
+  return normalizados;
+}
+
 // resultado: 'sucesso' | 'invalido' | 'tempFalha' | 'permFalha'
-export async function enviarEmail({ destinatario, assunto, corpoHtml, corpoTexto }) {
+export async function enviarEmail({ destinatario, assunto, corpoHtml, corpoTexto, anexos = null }) {
   const email = String(destinatario || '').trim();
   const assuntoNormalizado = prepararAssunto(assunto);
+  const anexosPreparados = prepararAnexos(anexos);
 
   if (!email) {
     return { resultado: 'invalido', erro: 'Destinatário de e-mail vazio.' };
@@ -192,6 +237,7 @@ export async function enviarEmail({ destinatario, assunto, corpoHtml, corpoTexto
         recipients: {
           to: [{ address: email }],
         },
+        attachments: anexosPreparados.length > 0 ? anexosPreparados : undefined,
         replyTo: ENV.EMAIL_REPLY_TO ? [{ address: ENV.EMAIL_REPLY_TO }] : undefined,
       };
 
@@ -223,6 +269,13 @@ export async function enviarEmail({ destinatario, assunto, corpoHtml, corpoTexto
         erro: error?.message || 'Falha ao enviar e-mail via ACS.',
       };
     }
+  }
+
+  if (anexosPreparados.length > 0) {
+    return {
+      resultado: 'permFalha',
+      erro: 'Anexos inline não são suportados pelo provider SES configurado.',
+    };
   }
 
   if (!ENV.EMAIL_FROM) {

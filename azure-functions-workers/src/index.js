@@ -5,3 +5,4 @@ import './functions/processarFilaRepassesGateway.js';
 import './functions/enfileirarAvaliacoesPendentes.js';
 import './functions/enfileirarLembretesConsulta.js';
 import './functions/enfileirarLembretePerfilFisioterapeuta.js';
+import './functions/enfileirarProgramaIndicacaoFisioterapeuta.js';
