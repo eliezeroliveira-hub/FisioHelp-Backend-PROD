@@ -1,5 +1,8 @@
 import { escapeHtml, montarShell } from './emailTemplates.js';
 
+const APP_STORE_URL = 'https://apps.apple.com/br/app/fisiohelp/id6794336661';
+const GOOGLE_PLAY_URL = 'https://play.google.com/store/apps/details?id=br.com.fisiohelp.app';
+
 function texto(value, fallback = '') {
   const normalized = String(value ?? '').trim();
   return normalized || fallback;
@@ -33,6 +36,22 @@ function blocoCodigoHtml(rotulo, codigo) {
       <div style="margin:0 0 8px 0;color:#6f5a4c;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">${escapeHtml(rotulo)}</div>
       <div style="color:#3D2B22;font-size:30px;line-height:1.2;font-weight:700;letter-spacing:.18em;">${escapeHtml(codigo)}</div>
     </div>`;
+}
+
+function botoesLojasHtml() {
+  return `
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:8px 0 24px 0;">
+      <tr>
+        <td style="padding:0 0 10px 0;">
+          <a href="${APP_STORE_URL}" target="_blank" rel="noopener noreferrer" style="display:block;padding:13px 18px;border-radius:8px;background:#F46337;color:#FFFFFF;font-size:16px;line-height:1.3;font-weight:700;text-align:center;text-decoration:none;">Baixar na App Store</a>
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <a href="${GOOGLE_PLAY_URL}" target="_blank" rel="noopener noreferrer" style="display:block;padding:13px 18px;border-radius:8px;background:#3D2B22;color:#FFFFFF;font-size:16px;line-height:1.3;font-weight:700;text-align:center;text-decoration:none;">Baixar no Google Play</a>
+        </td>
+      </tr>
+    </table>`;
 }
 
 export function montarEmailVerificacaoPaciente({ nome, codigo, expiraEmMinutos = 10 } = {}) {
@@ -216,6 +235,8 @@ export function montarEmailConvitePreCadastroSimples({
     <h1 style="margin:0 0 18px 0;color:#3D2B22;font-size:22px;line-height:1.3;font-weight:700;">${escapeHtml(assunto)}</h1>
     ${paragrafoHtml(`Olá, ${paciente},`)}
     ${paragrafoHtml(`${fisio} iniciou seu pré-cadastro na FisioHelp para facilitar seu acompanhamento e o agendamento de atendimentos pela plataforma.`)}
+    ${paragrafoHtml('Baixe o app FisioHelp na loja do seu celular:')}
+    ${botoesLojasHtml()}
     ${paragrafoHtml('Para acessar, abra o app FisioHelp, toque em "Cadastre-se" e escolha "Já fui pré-cadastrado por um fisioterapeuta". Informe seu CPF e e-mail para criar sua senha.')}
     ${paragrafoHtml('Depois de ativar sua conta, você poderá completar seus dados, acessar sua área no aplicativo e acompanhar consultas, mensagens e notificações relacionadas aos seus atendimentos.')}
     ${paragrafoHtml('Se você não reconhece este convite ou acredita que recebeu esta mensagem por engano, ignore este e-mail ou entre em contato pelo e-mail suporte@fisiohelp.com.br.')}
@@ -225,6 +246,11 @@ export function montarEmailConvitePreCadastroSimples({
   const conteudoTexto = `Olá, ${paciente},
 
 ${fisio} iniciou seu pré-cadastro na FisioHelp para facilitar seu acompanhamento e o agendamento de atendimentos pela plataforma.
+
+Baixe o app FisioHelp na loja do seu celular:
+
+App Store: ${APP_STORE_URL}
+Google Play: ${GOOGLE_PLAY_URL}
 
 Para acessar, abra o app FisioHelp, toque em "Cadastre-se" e escolha "Já fui pré-cadastrado por um fisioterapeuta". Informe seu CPF e e-mail para criar sua senha.
 
