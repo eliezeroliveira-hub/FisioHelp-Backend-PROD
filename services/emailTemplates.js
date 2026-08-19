@@ -521,7 +521,7 @@ export function montarEmailOrientacaoCheckinFisioterapeuta(dados = {}) {
           <li style="margin:0 0 8px 0;">Chegue ao endereço do paciente.</li>
           <li style="margin:0 0 8px 0;">Abra <strong>Consultas</strong> ou <strong>Detalhes da consulta</strong> no app FisioHelp.</li>
           <li style="margin:0 0 8px 0;">Faça o check-in somente depois de chegar ao local.</li>
-          <li style="margin:0;">Após encontrar o paciente, solicite a informação de validação exibida na tela <strong>Detalhes da consulta</strong> do paciente.</li>
+          <li style="margin:0;">Após encontrar o paciente, solicite o código de validação exibido na tela <strong>Detalhes da consulta</strong> do paciente.</li>
         </ol>
       </div>
       ${paragrafoHtml('Ao confirmar, sua localização poderá ser registrada e o paciente receberá um aviso da sua chegada.')}
@@ -536,7 +536,7 @@ Como realizar o check-in:
 1. Chegue ao endereço do paciente.
 2. Abra Consultas ou Detalhes da consulta no app FisioHelp.
 3. Faça o check-in somente depois de chegar ao local.
-4. Após encontrar o paciente, solicite a informação de validação exibida na tela Detalhes da consulta do paciente.
+4. Após encontrar o paciente, solicite o código de validação exibido na tela Detalhes da consulta do paciente.
 
 Ao confirmar, sua localização poderá ser registrada e o paciente receberá um aviso da sua chegada.
 

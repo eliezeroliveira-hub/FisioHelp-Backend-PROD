@@ -60,7 +60,10 @@ test('renderiza o e-mail de orientação do fisioterapeuta no padrão FisioHelp'
   assert.match(email.corpoHtml, /Prepare-se para o check-in/);
   assert.match(email.corpoHtml, /Dra\. Maria/);
   assert.match(email.corpoHtml, /20\/08\/2026/);
+  assert.match(email.corpoHtml, /solicite o código de validação exibido/);
   assert.match(email.corpoTexto, /Faça o check-in somente depois de chegar ao local/);
+  assert.match(email.corpoTexto, /solicite o código de validação exibido/);
+  assert.doesNotMatch(email.corpoTexto, /solicite a informação de validação/);
   assert.equal((email.corpoTexto.match(/Mensagem automática/g) || []).length, 1);
 });
 
