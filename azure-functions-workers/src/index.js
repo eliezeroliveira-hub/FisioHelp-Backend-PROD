@@ -4,5 +4,6 @@ import './functions/processarFilaReembolsosGateway.js';
 import './functions/processarFilaRepassesGateway.js';
 import './functions/enfileirarAvaliacoesPendentes.js';
 import './functions/enfileirarLembretesConsulta.js';
+import './functions/enfileirarOrientacaoCheckinFisio.js';
 import './functions/enfileirarLembretePerfilFisioterapeuta.js';
 import './functions/enfileirarProgramaIndicacaoFisioterapeuta.js';

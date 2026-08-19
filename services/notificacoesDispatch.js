@@ -56,6 +56,26 @@ function formatarDataHora(value) {
   return `${pad2(date.getUTCDate())}/${pad2(date.getUTCMonth() + 1)}/${date.getUTCFullYear()}, ${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}`;
 }
 
+function separarDataHora(value) {
+  const dataHora = formatarDataHora(value);
+  if (!dataHora) {
+    return {
+      data: 'data informada no aplicativo',
+      hora: 'horário informado no aplicativo',
+    };
+  }
+
+  const [data, hora] = dataHora.split(',').map((item) => item.trim());
+  return {
+    data: data || 'data informada no aplicativo',
+    hora: hora || 'horário informado no aplicativo',
+  };
+}
+
+function normalizarTokenConsulta(value) {
+  const token = String(value ?? '').trim();
+  return /^\d{6}$/.test(token) ? token : null;
+}
 function trechoMensagem(value) {
   const raw = String(value ?? '').trim();
   if (!raw) return 'enviou uma mensagem.';
@@ -523,28 +543,97 @@ async function consultaReagendada({ consultaId, consultaOriginalId = null, dataH
   });
 }
 
-async function tokenConsultaGerado({ consultaId }) {
+async function tokenConsultaGerado({ consultaId, tokenValidacao = null }) {
   return safeDispatch('tokenConsultaGerado', async () => {
     const consulta = await buscarConsultaResumo(consultaId);
     if (!consulta) return null;
 
-    const data = formatarDataHora(consulta.DataHora);
-    return enfileirar(
-      { usuarioTipo: 'Paciente', usuarioId: consulta.PacienteId },
+    const codigo = normalizarTokenConsulta(tokenValidacao);
+    if (!codigo) {
+      log('warn', 'Token de validação ausente na comunicação de check-in', {
+        consultaId: Number(consulta.Id),
+      });
+    }
+
+    const { data, hora } = separarDataHora(consulta.DataHora);
+    const pacienteNome = texto(consulta.PacienteNome, 'Paciente');
+    const fisioterapeutaNome = texto(consulta.FisioterapeutaNome, 'Fisioterapeuta');
+    const payload = dadosBase('token_consulta_gerado', {
+      consultaId: Number(consulta.Id),
+      pacienteId: Number(consulta.PacienteId),
+      fisioterapeutaId: Number(consulta.FisioterapeutaId),
+    });
+    const destinatario = {
+      usuarioTipo: 'Paciente',
+      usuarioId: consulta.PacienteId,
+    };
+
+    const push = enfileirar(
+      destinatario,
       {
         tipo: 'Agendamento',
         titulo: 'Código de validação disponível',
-        mensagem: `O fisioterapeuta fez check-in${data ? ` na consulta de ${data}` : ''}. Abra a consulta para ver o código de validação.`,
+        mensagem: `${primeiroNome(fisioterapeutaNome, 'Fisioterapeuta')} fez check-in. Abra a consulta para ver o código de validação.`,
         referenciaId: Number(consulta.Id),
-        dados: dadosBase('token_consulta_gerado', {
-          consultaId: Number(consulta.Id),
-          fisioterapeutaId: Number(consulta.FisioterapeutaId)
-        })
+        dados: payload,
       }
     );
+
+    const email = enfileirar(
+      destinatario,
+      {
+        tipo: 'Agendamento',
+        titulo: 'Seu fisioterapeuta chegou para a consulta',
+        mensagem: `Olá, ${pacienteNome}.
+
+${fisioterapeutaNome} realizou o check-in e confirmou que chegou ao seu endereço para a consulta de ${data} às ${hora}.
+
+Informação de validação: ${codigo || 'consulte no app'}
+
+Informe esta validação ao fisioterapeuta somente depois de encontrá-lo no endereço do atendimento.
+
+Equipe FisioHelp`,
+        referenciaId: Number(consulta.Id),
+        dados: {
+          ...payload,
+          emailModelo: 'checkin_paciente',
+          pacienteNome,
+          fisioterapeutaNome,
+          dataConsultaTexto: data,
+          horaConsultaTexto: hora,
+          tokenValidacao: codigo,
+        },
+      },
+      { canal: 'email', gravarInbox: false }
+    );
+
+    const whatsapp = enfileirar(
+      destinatario,
+      {
+        tipo: 'Agendamento',
+        titulo: 'Fisioterapeuta no local',
+        mensagem: `${fisioterapeutaNome} acabou de realizar o check-in para a consulta de ${data} às ${hora}. Abra Detalhes da consulta no app FisioHelp.`,
+        referenciaId: Number(consulta.Id),
+        dados: {
+          ...payload,
+          whatsappTemplate: {
+            chave: 'checkin_paciente',
+            variaveis: {
+              1: primeiroNome(pacienteNome, 'Paciente'),
+              2: limitar(fisioterapeutaNome, 60),
+              3: data,
+              4: hora,
+            },
+          },
+        },
+      },
+      { canal: 'whatsapp', gravarInbox: false }
+    );
+
+    const resultados = await Promise.all([push, email, whatsapp]);
+    return resultados.find(Boolean) ?? null;
   });
 }
-
 async function consultaConcluida({ consultaId }) {
   return safeDispatch('consultaConcluida', async () => {
     const consulta = await buscarConsultaResumo(consultaId);

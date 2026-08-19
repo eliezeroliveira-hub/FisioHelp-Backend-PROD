@@ -42,6 +42,21 @@ As variaveis `*_WORKER_ENABLED` dos fluxos legados controlam apenas os timers in
 via `start*Worker()`. As Functions legadas chamam `tick()` diretamente e nao dependem dessas
 flags para executar.
 
+O fluxo `enfileirarOrientacaoCheckinFisio` é independente do lembrete de consulta de
+24 horas. Ele valida `CHECKIN_ORIENTACAO_WORKER_ENABLED` dentro do próprio `tick()` e
+enfileira uma única orientação por consulta/canal quando a consulta entra na janela de
+60 minutos antes do atendimento. Configurações:
+
+- `CHECKIN_ORIENTACAO_WORKER_ENABLED=false`
+- `CHECKIN_ORIENTACAO_EMAIL_ENABLED=true`
+- `CHECKIN_ORIENTACAO_WHATSAPP_ENABLED=true`
+- `CHECKIN_ORIENTACAO_MINUTOS_ANTES=60`
+- `CHECKIN_ORIENTACAO_MINIMO_MINUTOS_ANTES=50`
+- `CHECKIN_ORIENTACAO_BATCH_SIZE=50`
+- `CHECKIN_ORIENTACAO_CONSULTA_ID=` (opcional; restringe o teste HML a uma consulta)
+
+O lembrete existente `enfileirarLembretesConsulta` e o tipo
+`consulta_lembrete_24h` não são alterados por esse fluxo.
 O fluxo `enfileirarLembretePerfilFisioterapeuta` valida `PERFIL_LEMBRETE_WORKER_ENABLED`
 dentro do proprio `tick()` e permanece inativo por padrao. Configuracoes:
 

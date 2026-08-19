@@ -15,6 +15,10 @@ import { HttpError } from '../utils/httpError.js';
 import { log } from '../config/logger.js';
 import { agoraBrasilDate, getAppTimeZoneParts } from '../utils/appDateTime.js';
 import { montarPrestadorCheckout } from '../utils/professionalCheckout.js';
+import {
+  CHECKIN_ANTECEDENCIA_MIN,
+  TOKEN_VALIDACAO_EXPIRACAO_MIN as TOKEN_EXPIRACAO_MIN,
+} from '../config/consultaRules.js';
 
 /**
  * Executa uma query garantindo SESSION_CONTEXT no MESMO batch/Request.
@@ -845,8 +849,7 @@ function isTerminalStatus(s) {
 }
 
 const DEFAULT_DURACAO_MIN = 60;
-const TOKEN_EXPIRACAO_MIN = 10;
-const CHECKIN_ANTECEDENCIA_MIN = 10;
+
 const APP_TIME_ZONE = 'America/Sao_Paulo';
 
 function formatDateTimePtBr(value) {
@@ -3286,47 +3289,94 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
   const lon = parseNumber(body?.longitude ?? body?.CheckinLongitude, 'longitude', { min: -180, max: 180 });
   const evidencia = normalizeText(body?.evidenciaUrl ?? body?.EvidenciaCheckin ?? null, 1000);
 
-  //  Check-in: registra localização/hora/evidência (não valida token e não conclui)
-  await queryWithContext(usuario, (req) => {
-    req.input('Id', sql.Int, consultaId);
-    req.input('CheckinLatitude', sql.Decimal(9, 6), lat);
-    req.input('CheckinLongitude', sql.Decimal(9, 6), lon);
-    req.input('EvidenciaCheckin', sql.NVarChar(1000), evidencia);
-    req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
-  }, `
-    UPDATE dbo.Consultas
-    SET CheckinLatitude = COALESCE(@CheckinLatitude, CheckinLatitude),
-        CheckinLongitude = COALESCE(@CheckinLongitude, CheckinLongitude),
-        CheckinHora = COALESCE(CheckinHora, @AgoraBrasil),
-        DataCheckin = COALESCE(DataCheckin, @AgoraBrasil),
-        EvidenciaCheckin = COALESCE(@EvidenciaCheckin, EvidenciaCheckin)
-    WHERE Id = @Id;
-  `);
-
-  //  No "token flow", o token é gerado aqui (idempotente) — paciente apenas visualiza via GET /consultas/:id/token
-  let tokenExpiraEm = null;
-  let tokenGeradoEm = null;
-
+  // Check-in e geração do token são atômicos. Somente a primeira gravação
+  // de presença pode disparar os avisos de chegada ao paciente.
   const pacienteId = Number(existente.PacienteId);
   if (!Number.isFinite(pacienteId) || pacienteId <= 0) {
     throw new HttpError(400, 'Consulta inválida (PacienteId ausente).');
   }
 
   const r = await queryWithContext(usuario, (req) => {
-    req.input('ConsultaId', sql.Int, consultaId);
+    req.input('Id', sql.Int, consultaId);
+    req.input('CheckinLatitude', sql.Decimal(9, 6), lat);
+    req.input('CheckinLongitude', sql.Decimal(9, 6), lon);
+    req.input('EvidenciaCheckin', sql.NVarChar(1000), evidencia);
+    req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
     req.input('PacienteId', sql.Int, pacienteId);
     req.input('MinutosExpiracao', sql.Int, TOKEN_EXPIRACAO_MIN);
   }, `
-    EXEC dbo.SP_GerarTokenValidacaoConsulta @ConsultaId, @PacienteId, @MinutosExpiracao;
+    DECLARE @Checkin TABLE (
+      CheckinNovo bit NOT NULL
+    );
+
+    DECLARE @Token TABLE (
+      Sucesso bit NULL,
+      Mensagem nvarchar(4000) NULL,
+      ConsultaId int NULL,
+      TokenValidacao nvarchar(16) NULL,
+      TokenGeradoEm datetime2(7) NULL,
+      TokenExpiraEm datetime2(7) NULL
+    );
+
+    BEGIN TRY
+      BEGIN TRANSACTION;
+
+      UPDATE dbo.Consultas
+      SET CheckinLatitude = COALESCE(@CheckinLatitude, CheckinLatitude),
+          CheckinLongitude = COALESCE(@CheckinLongitude, CheckinLongitude),
+          CheckinHora = COALESCE(CheckinHora, @AgoraBrasil),
+          DataCheckin = COALESCE(DataCheckin, @AgoraBrasil),
+          EvidenciaCheckin = COALESCE(@EvidenciaCheckin, EvidenciaCheckin)
+      OUTPUT CAST(
+        CASE
+          WHEN deleted.CheckinHora IS NULL
+           AND deleted.DataCheckin IS NULL
+           AND (inserted.CheckinHora IS NOT NULL OR inserted.DataCheckin IS NOT NULL)
+          THEN 1 ELSE 0
+        END
+        AS bit
+      ) INTO @Checkin (CheckinNovo)
+      WHERE Id = @Id;
+
+      IF NOT EXISTS (SELECT 1 FROM @Checkin)
+        THROW 52001, N'Consulta não encontrada ou sem permissão para check-in.', 1;
+
+      INSERT INTO @Token
+        (Sucesso, Mensagem, ConsultaId, TokenValidacao, TokenGeradoEm, TokenExpiraEm)
+      EXEC dbo.SP_GerarTokenValidacaoConsulta
+        @ConsultaId = @Id,
+        @PacienteId = @PacienteId,
+        @MinutosExpiracao = @MinutosExpiracao;
+
+      COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+      IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+      THROW;
+    END CATCH;
+
+    SELECT TOP (1)
+      t.Sucesso,
+      t.Mensagem,
+      t.ConsultaId,
+      t.TokenValidacao,
+      t.TokenGeradoEm,
+      t.TokenExpiraEm,
+      c.CheckinNovo
+    FROM @Token t
+    CROSS JOIN @Checkin c;
   `);
 
   const row = r?.recordset?.[0] ?? null;
-  tokenExpiraEm = formatSqlLocalDateTime(row?.TokenExpiraEm ?? row?.tokenExpiraEm ?? null);
-  tokenGeradoEm = formatSqlLocalDateTime(row?.TokenGeradoEm ?? row?.tokenGeradoEm ?? null);
+  const tokenValidacao = String(row?.TokenValidacao ?? row?.tokenValidacao ?? '').trim();
+  const tokenExpiraEm = formatSqlLocalDateTime(row?.TokenExpiraEm ?? row?.tokenExpiraEm ?? null);
+  const tokenGeradoEm = formatSqlLocalDateTime(row?.TokenGeradoEm ?? row?.tokenGeradoEm ?? null);
+  const checkinNovo = Number(row?.CheckinNovo ?? row?.checkinNovo ?? 0) === 1;
 
   const consultaAtualizada = await this.buscarPorId(consultaId, usuario);
-  void notificacoesDispatch.tokenConsultaGerado({ consultaId });
-
+  if (checkinNovo) {
+    await notificacoesDispatch.tokenConsultaGerado({ consultaId, tokenValidacao });
+  }
   // mantém compatibilidade: pode retornar a consulta direto ou {consulta, tokenExpiraEm}
   return tokenExpiraEm
     ? { consulta: consultaAtualizada, tokenExpiraEm, tokenGeradoEm }

@@ -738,6 +738,22 @@ function montarTemplateWhatsAppItem(item) {
     };
   }
 
+  if (String(template.chave || '').trim() === 'checkin_fisio') {
+    return {
+      contentSid: ENV.TWILIO_WHATSAPP_CONTENT_SID_CHECKIN_FISIO,
+      contentVariables: template.variaveis,
+      templateObrigatorio: true,
+    };
+  }
+
+  if (String(template.chave || '').trim() === 'checkin_paciente') {
+    return {
+      contentSid: ENV.TWILIO_WHATSAPP_CONTENT_SID_CHECKIN_PACIENTE,
+      contentVariables: template.variaveis,
+      templateObrigatorio: true,
+    };
+  }
+
   return { templateObrigatorio: true };
 }
 

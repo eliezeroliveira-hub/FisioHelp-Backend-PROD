@@ -491,7 +491,108 @@ Equipe FisioHelp`;
   return montarShell({ assunto, conteudoHtml, conteudoTexto });
 }
 
+function normalizarCodigoValidacaoConsulta(value) {
+  const codigo = String(value ?? '').trim();
+  return /^\d{6}$/.test(codigo) ? codigo : null;
+}
+
+function normalizarMinutosCheckin(value) {
+  const minutos = Number.parseInt(String(value ?? ''), 10);
+  return Number.isInteger(minutos) && minutos > 0 && minutos <= 120 ? minutos : 10;
+}
+
+export function montarEmailOrientacaoCheckinFisioterapeuta(dados = {}) {
+  const assunto = 'Orientações para o check-in da sua consulta';
+  const nomeFisioterapeuta = texto(dados?.fisioterapeutaNome, 'Fisioterapeuta');
+  const nomePaciente = texto(dados?.pacienteNome, 'Paciente');
+  const data = texto(dados?.dataConsultaTexto, 'data informada no aplicativo');
+  const hora = texto(dados?.horaConsultaTexto, 'horário informado no aplicativo');
+  const minutos = normalizarMinutosCheckin(dados?.checkinAntecedenciaMinutos);
+
+  return montarShell({
+    assunto,
+    conteudoHtml: `
+      <h1 style="margin:0 0 16px 0;color:#3D2B22;font-size:22px;line-height:1.3;font-weight:700;">Prepare-se para o check-in</h1>
+      ${paragrafoHtml(`Olá, **${nomeFisioterapeuta}**.`)}
+      ${paragrafoHtml(`O check-in da consulta agendada com **${nomePaciente}**, no dia **${data} às ${hora}**, ficará disponível **${minutos} minutos antes** do horário.`)}
+      <div style="margin:20px 0;padding:18px;background:#FDF4E0;border:1px solid rgba(61,43,34,0.12);border-radius:8px;">
+        ${tituloSecaoHtml('Como realizar o check-in')}
+        <ol style="margin:0;padding-left:22px;color:#3D2B22;font-size:15px;line-height:1.7;">
+          <li style="margin:0 0 8px 0;">Chegue ao endereço do paciente.</li>
+          <li style="margin:0 0 8px 0;">Abra <strong>Consultas</strong> ou <strong>Detalhes da consulta</strong> no app FisioHelp.</li>
+          <li style="margin:0 0 8px 0;">Faça o check-in somente depois de chegar ao local.</li>
+          <li style="margin:0;">Após encontrar o paciente, solicite a informação de validação exibida na tela <strong>Detalhes da consulta</strong> do paciente.</li>
+        </ol>
+      </div>
+      ${paragrafoHtml('Ao confirmar, sua localização poderá ser registrada e o paciente receberá um aviso da sua chegada.')}
+      ${paragrafoHtml('Boa consulta! 🧡')}`,
+    conteudoTexto: `${assunto}
+
+Olá, ${nomeFisioterapeuta}.
+
+O check-in da consulta agendada com ${nomePaciente}, no dia ${data} às ${hora}, ficará disponível ${minutos} minutos antes do horário.
+
+Como realizar o check-in:
+1. Chegue ao endereço do paciente.
+2. Abra Consultas ou Detalhes da consulta no app FisioHelp.
+3. Faça o check-in somente depois de chegar ao local.
+4. Após encontrar o paciente, solicite a informação de validação exibida na tela Detalhes da consulta do paciente.
+
+Ao confirmar, sua localização poderá ser registrada e o paciente receberá um aviso da sua chegada.
+
+Boa consulta!
+
+`,
+  });
+}
+
+export function montarEmailCheckinPaciente(dados = {}) {
+  const assunto = 'Seu fisioterapeuta chegou para a consulta';
+  const nomePaciente = texto(dados?.pacienteNome, 'Paciente');
+  const nomeFisioterapeuta = texto(dados?.fisioterapeutaNome, 'Fisioterapeuta');
+  const data = texto(dados?.dataConsultaTexto, 'data informada no aplicativo');
+  const hora = texto(dados?.horaConsultaTexto, 'horário informado no aplicativo');
+  const codigo = normalizarCodigoValidacaoConsulta(dados?.tokenValidacao);
+  const codigoTexto = codigo || 'Consulte no app';
+
+  return montarShell({
+    assunto,
+    conteudoHtml: `
+      <h1 style="margin:0 0 16px 0;color:#3D2B22;font-size:22px;line-height:1.3;font-weight:700;">O fisioterapeuta chegou</h1>
+      ${paragrafoHtml(`Olá, **${nomePaciente}**.`)}
+      ${paragrafoHtml(`${nomeFisioterapeuta} realizou o check-in e confirmou que chegou ao seu endereço para a consulta de **${data} às ${hora}**.`)}
+      <div style="margin:20px 0;padding:18px;background:#FDF4E0;border:1px solid rgba(61,43,34,0.12);border-radius:8px;text-align:center;">
+        <p style="margin:0 0 8px 0;color:#6f5a4c;font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;">Informação de validação</p>
+        <p style="margin:0;color:#3D2B22;font-size:30px;line-height:1.2;font-weight:700;letter-spacing:.18em;">${escapeHtml(codigoTexto)}</p>
+      </div>
+      ${paragrafoHtml('Informe esta validação ao fisioterapeuta somente depois de encontrá-lo no endereço do atendimento.')}
+      ${paragrafoHtml('Você também pode abrir Detalhes da consulta no app FisioHelp para visualizar a informação enquanto ela estiver válida.')}
+      ${paragrafoHtml('Boa consulta! 🧡')}`,
+    conteudoTexto: `${assunto}
+
+Olá, ${nomePaciente}.
+
+${nomeFisioterapeuta} realizou o check-in e confirmou que chegou ao seu endereço para a consulta de ${data} às ${hora}.
+
+Informação de validação: ${codigoTexto}
+
+Informe esta validação ao fisioterapeuta somente depois de encontrá-lo no endereço do atendimento.
+
+Você também pode abrir Detalhes da consulta no app FisioHelp para visualizar a informação enquanto ela estiver válida.
+
+Boa consulta!
+
+`,
+  });
+}
 export function montarEmailNotificacao({ titulo, mensagem, dados = null } = {}) {
+  if (dados?.emailModelo === 'orientacao_checkin_fisioterapeuta') {
+    return montarEmailOrientacaoCheckinFisioterapeuta(dados);
+  }
+
+  if (dados?.emailModelo === 'checkin_paciente') {
+    return montarEmailCheckinPaciente(dados);
+  }
   if (dados?.emailModelo === 'programa_indicacao_fisioterapeuta') {
     return montarEmailProgramaIndicacaoFisioterapeuta({
       nomeFisioterapeuta: dados?.fisioterapeutaNome,
@@ -558,6 +659,8 @@ ${mensagemTexto || 'Você recebeu uma nova mensagem da FisioHelp.'}${avaliacaoGo
 
 export default {
   montarEmailNotificacao,
+  montarEmailOrientacaoCheckinFisioterapeuta,
+  montarEmailCheckinPaciente,
   escapeHtml,
   montarShell,
 };

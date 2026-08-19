@@ -32,6 +32,7 @@ import { startRepassesGatewayWorker } from './workers/repassesGatewayWorker.js';
 import { startNotificacoesWorker } from './workers/notificacoesWorker.js';
 import { startAvaliacoesPendentesWorker } from './workers/avaliacoesPendentesWorker.js';
 import { startConsultasLembretesWorker } from './workers/consultasLembretesWorker.js';
+import { startOrientacaoCheckinFisioWorker } from './workers/orientacaoCheckinFisioWorker.js';
 import { isContatoProviderReal } from './providers/contatoProvider.js';
 import fileStorageProvider from './providers/fileStorageProvider.js';
 
@@ -205,5 +206,6 @@ app.listen(ENV.PORT, () => {
   startNotificacoesWorker();
   startAvaliacoesPendentesWorker();
   startConsultasLembretesWorker();
+  startOrientacaoCheckinFisioWorker();
 });
 
