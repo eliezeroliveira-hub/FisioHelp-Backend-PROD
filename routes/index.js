@@ -39,6 +39,7 @@ import cadastroRoutes from './cadastro.js';
 import notificacoesRoutes from './notificacoes.js';
 import notificacoesWebhooksRoutes from './notificacoesWebhooks.js';
 import contatoPublicoRoutes from './contatoPublico.js';
+import appVersionRoutes from './appVersion.js';
 
 
 //  Middlewares globais
@@ -65,6 +66,7 @@ router.get('/status', (_req, res) => {
 //  Catálogos públicos
 router.use('/especialidades', especialidadesRoutes);
 router.use('/cadastro', cadastroRoutes);
+router.use('/app-versao', appVersionRoutes);
 
 //  Pacientes: cadastro público (POST /pacientes) e o próprio arquivo /pacientes.js aplica JWT no restante
 router.use('/pacientes', pacientesRoutes);

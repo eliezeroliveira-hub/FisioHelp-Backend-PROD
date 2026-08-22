@@ -37,6 +37,38 @@ function parseModeEnv(name, fallback, allowed) {
   return value;
 }
 
+function parseAppVersionEnv(name, fallback = '0.0.0') {
+  const value = String(process.env[name] || fallback).trim();
+  if (!/^\d+(?:\.\d+){1,3}$/.test(value)) {
+    throw new Error(`${name} inválido. Use versão numérica como 1.0.3.`);
+  }
+  return value;
+}
+
+function parseNonNegativeIntEnv(name, fallback = 0) {
+  const raw = process.env[name];
+  if (raw === undefined || String(raw).trim() === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0) {
+    throw new Error(`${name} inválido. Use inteiro maior ou igual a zero.`);
+  }
+  return n;
+}
+
+function parseHttpUrlEnv(name, fallback) {
+  const value = String(process.env[name] || fallback).trim();
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`${name} inválido. Use uma URL HTTPS válida.`);
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new Error(`${name} inválido. Use uma URL HTTPS válida.`);
+  }
+  return parsed.toString();
+}
+
 const tokenExpirationRaw = process.env.TOKEN_EXPIRATION || '1d';
 if (!/^\d+[smhd]$/.test(tokenExpirationRaw)) {
   throw new Error('TOKEN_EXPIRATION inválido. Use formato como 15m, 1h, 7d.');
@@ -158,6 +190,29 @@ const calendarioPublicoCacheMode = parseModeEnv(
 const calendarioPublicoCacheTtlMs = parsePositiveIntEnv('CALENDARIO_PUBLICO_CACHE_TTL_MS', 15000);
 const calendarioPublicoCacheMaxEntries = parsePositiveIntEnv('CALENDARIO_PUBLICO_CACHE_MAX_ENTRIES', 500);
 
+const mobileAndroidUpdateMode = parseModeEnv(
+  'MOBILE_ANDROID_UPDATE_MODE',
+  'off',
+  ['off', 'required']
+);
+const mobileAndroidMinVersion = parseAppVersionEnv('MOBILE_ANDROID_MIN_VERSION');
+const mobileAndroidMinBuild = parseNonNegativeIntEnv('MOBILE_ANDROID_MIN_BUILD');
+const mobileAndroidStoreUrl = parseHttpUrlEnv(
+  'MOBILE_ANDROID_STORE_URL',
+  'https://play.google.com/store/apps/details?id=br.com.fisiohelp.app&pli=1'
+);
+const mobileIosUpdateMode = parseModeEnv(
+  'MOBILE_IOS_UPDATE_MODE',
+  'off',
+  ['off', 'required']
+);
+const mobileIosMinVersion = parseAppVersionEnv('MOBILE_IOS_MIN_VERSION');
+const mobileIosMinBuild = parseNonNegativeIntEnv('MOBILE_IOS_MIN_BUILD');
+const mobileIosStoreUrl = parseHttpUrlEnv(
+  'MOBILE_IOS_STORE_URL',
+  'https://apps.apple.com/br/app/fisiohelp/id6794336661'
+);
+
 /**
  * Variáveis globais do ambiente
  * - Centraliza acesso às variáveis de configuração
@@ -191,6 +246,14 @@ export const ENV = {
   CALENDARIO_PUBLICO_CACHE_MODE: calendarioPublicoCacheMode,
   CALENDARIO_PUBLICO_CACHE_TTL_MS: calendarioPublicoCacheTtlMs,
   CALENDARIO_PUBLICO_CACHE_MAX_ENTRIES: calendarioPublicoCacheMaxEntries,
+  MOBILE_ANDROID_UPDATE_MODE: mobileAndroidUpdateMode,
+  MOBILE_ANDROID_MIN_VERSION: mobileAndroidMinVersion,
+  MOBILE_ANDROID_MIN_BUILD: mobileAndroidMinBuild,
+  MOBILE_ANDROID_STORE_URL: mobileAndroidStoreUrl,
+  MOBILE_IOS_UPDATE_MODE: mobileIosUpdateMode,
+  MOBILE_IOS_MIN_VERSION: mobileIosMinVersion,
+  MOBILE_IOS_MIN_BUILD: mobileIosMinBuild,
+  MOBILE_IOS_STORE_URL: mobileIosStoreUrl,
 
   // Logs e informações gerais
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',
