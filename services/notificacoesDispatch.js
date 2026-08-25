@@ -401,6 +401,9 @@ function dadosBase(tipo, extras = {}) {
   return { tipo, ...extras };
 }
 
+const ORIENTACAO_CANCELAMENTO_SEM_CONFIRMACAO =
+  'Se a consulta permanecer sem confirmação quando faltarem 2 horas para o horário agendado, ela será cancelada automaticamente.';
+
 async function consultaAgendada({ consultaId, notificarPaciente = true, notificarFisioterapeuta = true }) {
   return safeDispatch('consultaAgendada', async () => {
     const consulta = await buscarConsultaResumo(consultaId);
@@ -433,7 +436,7 @@ async function consultaAgendada({ consultaId, notificarPaciente = true, notifica
         {
           tipo: 'Agendamento',
           titulo: 'Nova consulta',
-          mensagem: `Nova consulta com ${primeiroNome(consulta.PacienteNome, 'paciente')}${data ? ` em ${data}` : ''}.`,
+          mensagem: `Nova consulta com ${primeiroNome(consulta.PacienteNome, 'paciente')}${data ? ` em ${data}` : ''}. ${ORIENTACAO_CANCELAMENTO_SEM_CONFIRMACAO}`,
           referenciaId: Number(consulta.Id),
           dados: payload
         },
@@ -446,6 +449,8 @@ async function consultaAgendada({ consultaId, notificarPaciente = true, notifica
 Você recebeu uma nova consulta com ${primeiroNome(consulta.PacienteNome, 'o paciente')}${data ? ` em ${data}` : ''}.
 
 Para confirmar ou recusar a consulta, abra o app FisioHelp e acesse Consultas.
+
+${ORIENTACAO_CANCELAMENTO_SEM_CONFIRMACAO}
 
 Atenciosamente,
 Equipe FisioHelp`,
@@ -535,7 +540,7 @@ async function consultaReagendada({ consultaId, consultaOriginalId = null, dataH
       {
         tipo: 'Agendamento',
         titulo: 'Consulta reagendada',
-        mensagem: `A consulta com ${primeiroNome(consulta.PacienteNome, 'o paciente')} foi reagendada${trechoData}.`,
+        mensagem: `A consulta com ${primeiroNome(consulta.PacienteNome, 'o paciente')} foi reagendada${trechoData}. ${ORIENTACAO_CANCELAMENTO_SEM_CONFIRMACAO}`,
         referenciaId: Number(consulta.Id),
         dados: payload
       }
