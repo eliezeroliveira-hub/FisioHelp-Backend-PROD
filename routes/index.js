@@ -40,6 +40,7 @@ import notificacoesRoutes from './notificacoes.js';
 import notificacoesWebhooksRoutes from './notificacoesWebhooks.js';
 import contatoPublicoRoutes from './contatoPublico.js';
 import appVersionRoutes from './appVersion.js';
+import seoPublicoRoutes from './seoPublico.js';
 
 
 //  Middlewares globais
@@ -80,6 +81,7 @@ router.use('/notificacoes/webhook', notificacoesWebhooksRoutes);
 router.use('/parametros-sistema', parametrosSistemaRoutes);
 router.use('/arquivos', arquivosRoutes);
 router.use('/contato-publico', contatoPublicoRoutes);
+router.use('/publico/seo', seoPublicoRoutes);
 
 /* ----------------------------------------
     Administração (Painel Admin)
