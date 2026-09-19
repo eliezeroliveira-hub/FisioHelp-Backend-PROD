@@ -3,6 +3,11 @@ import { OAuth2Client } from "google-auth-library";
 import appleSigninAuth from "apple-signin-auth";
 import { ENV } from "../config/env.js";
 import { log } from "../config/logger.js";
+import {
+  buildOAuthAudiences,
+  tokenHasAllowedAudience,
+  verificationAudience,
+} from "../utils/oauthAudiences.js";
 
 let googleClient = null;
 
@@ -13,18 +18,12 @@ function getGoogleClient() {
   return googleClient;
 }
 
-function splitOAuthAudiences(value) {
-  return String(value || '')
-    .split(/[\s,;]+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
+function getGoogleAudiences() {
+  return buildOAuthAudiences(ENV.GOOGLE_CLIENT_ID, ENV.GOOGLE_CLIENT_IDS);
 }
 
-function getGoogleAudiences() {
-  return Array.from(new Set([
-    ...splitOAuthAudiences(ENV.GOOGLE_CLIENT_ID),
-    ...splitOAuthAudiences(ENV.GOOGLE_CLIENT_IDS),
-  ]));
+function getAppleAudiences() {
+  return buildOAuthAudiences(ENV.APPLE_CLIENT_ID, ENV.APPLE_CLIENT_IDS);
 }
 
 function normalizeExpectedNonce(value) {
@@ -51,7 +50,7 @@ export async function validarGoogleToken(idToken, expectedNonce) {
 
     const ticket = await getGoogleClient().verifyIdToken({
       idToken,
-      audience: audiences.length === 1 ? audiences[0] : audiences,
+      audience: verificationAudience(audiences),
     });
     const payload = ticket?.getPayload();
 
@@ -83,17 +82,20 @@ export async function validarGoogleToken(idToken, expectedNonce) {
 
 export async function validarAppleToken(idToken, expectedNonce) {
   try {
-    const audience = ENV.APPLE_CLIENT_ID;
-    if (!audience) {
-      throw new Error("Configuração ausente: APPLE_CLIENT_ID.");
+    const audiences = getAppleAudiences();
+    if (!audiences.length) {
+      throw new Error("Configuração ausente: APPLE_CLIENT_ID ou APPLE_CLIENT_IDS.");
     }
 
     const decoded = await appleSigninAuth.verifyIdToken(idToken, {
-      audience,
+      audience: verificationAudience(audiences),
       ignoreExpiration: false
     });
 
     if (!decoded?.sub) throw new Error("Token Apple inválido.");
+    if (!tokenHasAllowedAudience(decoded.aud, audiences)) {
+      throw new Error("Token Apple inválido para este aplicativo (audience mismatch).");
+    }
     assertTokenNonce("Apple", decoded.nonce, expectedNonce);
 
     return {

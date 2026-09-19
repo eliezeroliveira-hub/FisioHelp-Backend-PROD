@@ -82,7 +82,11 @@ const googleClientIds = optionalEnv('GOOGLE_CLIENT_IDS');
 if (isProd && !googleClientId && !googleClientIds) {
   throw new Error('GOOGLE_CLIENT_ID ou GOOGLE_CLIENT_IDS não configurado.');
 }
-const appleClientId = requiredInProduction('APPLE_CLIENT_ID');
+const appleClientId = optionalEnv('APPLE_CLIENT_ID');
+const appleClientIds = optionalEnv('APPLE_CLIENT_IDS');
+if (isProd && !appleClientId && !appleClientIds) {
+  throw new Error('APPLE_CLIENT_ID ou APPLE_CLIENT_IDS não configurado.');
+}
 
 // Webhook legado/stand-by; o fluxo Asaas usa ASAAS_WEBHOOK_TOKEN.
 const gatewayWebhookSecretValue = optionalEnv('GATEWAY_WEBHOOK_SECRET');
@@ -265,6 +269,7 @@ export const ENV = {
   GOOGLE_CLIENT_ID: googleClientId,
   GOOGLE_CLIENT_IDS: googleClientIds,
   APPLE_CLIENT_ID: appleClientId,
+  APPLE_CLIENT_IDS: appleClientIds,
 
   // Gateway
   GATEWAY_WEBHOOK_SECRET: gatewayWebhookSecret,
