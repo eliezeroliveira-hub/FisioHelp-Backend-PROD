@@ -55,6 +55,19 @@ function optionalPositiveInt(value, name) {
   return intEnv(value, null, { min: 1, max: 2_147_483_647, name });
 }
 
+function optionalEmail(value, name) {
+  if (value === undefined || value === null || String(value).trim() === '') return null;
+  const normalized = String(value).trim().toLowerCase();
+  if (
+    normalized.length > 320 ||
+    /\s/.test(normalized) ||
+    !/^[^@]+@[^@]+\.[^@]+$/.test(normalized)
+  ) {
+    throw new BcmedCampaignError('BCMED_CONFIG_INVALID', `${name} deve conter um e-mail válido.`);
+  }
+  return normalized;
+}
+
 function parseExcludedIds(value) {
   if (value === undefined || value === null || String(value).trim() === '') return [];
 
@@ -294,6 +307,21 @@ export function carregarConfigBeneficioBcmed(env = process.env) {
     );
   }
 
+  const fisioterapeutaIdAlvo = optionalPositiveInt(
+    env.BCMED_BENEFICIO_FISIOTERAPEUTA_ID,
+    'BCMED_BENEFICIO_FISIOTERAPEUTA_ID'
+  );
+  const fisioterapeutaEmailAlvo = optionalEmail(
+    env.BCMED_BENEFICIO_FISIOTERAPEUTA_EMAIL,
+    'BCMED_BENEFICIO_FISIOTERAPEUTA_EMAIL'
+  );
+  if (fisioterapeutaIdAlvo && fisioterapeutaEmailAlvo) {
+    throw new BcmedCampaignError(
+      'BCMED_CONFIG_INVALID',
+      'Configure somente um alvo piloto: ID ou e-mail do fisioterapeuta.'
+    );
+  }
+
   return {
     enabled,
     emailEnabled,
@@ -314,10 +342,8 @@ export function carregarConfigBeneficioBcmed(env = process.env) {
       max: 100,
       name: 'BCMED_BENEFICIO_MAX_BATCHES',
     }),
-    fisioterapeutaIdAlvo: optionalPositiveInt(
-      env.BCMED_BENEFICIO_FISIOTERAPEUTA_ID,
-      'BCMED_BENEFICIO_FISIOTERAPEUTA_ID'
-    ),
+    fisioterapeutaIdAlvo,
+    fisioterapeutaEmailAlvo,
     fisioterapeutaIdsExcluidos: parseExcludedIds(
       env.BCMED_BENEFICIO_FISIOTERAPEUTA_IDS_EXCLUIDOS
     ),

@@ -63,6 +63,28 @@ test('configuração ativa valida período, tolerância e campanha', () => {
   );
 });
 
+test('alvo piloto aceita e-mail normalizado e impede filtros concorrentes', () => {
+  const config = carregarConfigBeneficioBcmed(baseEnv({
+    BCMED_BENEFICIO_FISIOTERAPEUTA_EMAIL: '  PLAY-REVIEW-FISIO@FISIOHELP.COM.BR ',
+  }));
+  assert.equal(config.fisioterapeutaEmailAlvo, 'play-review-fisio@fisiohelp.com.br');
+  assert.equal(config.fisioterapeutaIdAlvo, null);
+
+  assert.throws(
+    () => carregarConfigBeneficioBcmed(baseEnv({
+      BCMED_BENEFICIO_FISIOTERAPEUTA_EMAIL: 'e-mail-invalido',
+    })),
+    /e-mail válido/
+  );
+  assert.throws(
+    () => carregarConfigBeneficioBcmed(baseEnv({
+      BCMED_BENEFICIO_FISIOTERAPEUTA_ID: '36',
+      BCMED_BENEFICIO_FISIOTERAPEUTA_EMAIL: 'play-review-fisio@fisiohelp.com.br',
+    })),
+    /somente um alvo piloto/
+  );
+});
+
 test('resolve ciclos independentes e tolerância inclusiva', () => {
   const config = carregarConfigBeneficioBcmed(baseEnv());
   const cases = [

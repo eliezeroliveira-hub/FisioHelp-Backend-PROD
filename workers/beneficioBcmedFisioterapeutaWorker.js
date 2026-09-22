@@ -73,6 +73,11 @@ async function buscarPendencias(usuario, config, contexto) {
     (req) => {
       req.input('BatchSize', sql.Int, config.batchSize);
       req.input('FisioterapeutaIdAlvo', sql.Int, config.fisioterapeutaIdAlvo);
+      req.input(
+        'FisioterapeutaEmailAlvo',
+        sql.NVarChar(320),
+        config.fisioterapeutaEmailAlvo
+      );
       req.input('IdsExcluidosJson', sql.NVarChar(sql.MAX), excluidosJson);
       req.input('EmailAtivo', sql.Bit, emailAtivo);
       req.input('PushAtivo', sql.Bit, pushAtivo);
@@ -142,6 +147,10 @@ async function buscarPendencias(usuario, config, contexto) {
           AND ISNULL(f.EmailVerificado, 0) = 1
           AND NULLIF(LTRIM(RTRIM(ISNULL(f.Email, N''))), N'') IS NOT NULL
           AND (@FisioterapeutaIdAlvo IS NULL OR f.Id = @FisioterapeutaIdAlvo)
+          AND (
+            @FisioterapeutaEmailAlvo IS NULL
+            OR LOWER(LTRIM(RTRIM(f.Email))) = @FisioterapeutaEmailAlvo
+          )
           AND NOT EXISTS (
             SELECT 1
             FROM OPENJSON(@IdsExcluidosJson) ids
@@ -450,6 +459,7 @@ export async function tick() {
       totalFisioterapeutas,
       totalFalhas,
       fisioterapeutaIdAlvo: config.fisioterapeutaIdAlvo,
+      fisioterapeutaEmailAlvoConfigurado: Boolean(config.fisioterapeutaEmailAlvo),
     });
 
     if (totalFalhas > 0) {

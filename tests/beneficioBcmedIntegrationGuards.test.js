@@ -52,6 +52,7 @@ test('worker lê configuração no tick e protege push, inbox e deduplicação',
   assert.match(workerSource, /IF @Canal = N'push' AND @Ciclo = 0/);
   assert.match(workerSource, /sp_getapplock/);
   assert.match(workerSource, /WITH \(UPDLOCK, HOLDLOCK\)/);
+  assert.match(workerSource, /FisioterapeutaEmailAlvo/);
   assert.match(workerSource, /BCMED_LINK_CHECK_FAILED/);
   assert.match(workerSource, /BCMED_ENQUEUE_FAILED/);
 });

@@ -99,6 +99,7 @@ os três dias seguintes são válidos, sem ultrapassar a data final. Configuraç
 - `BCMED_BENEFICIO_TOLERANCIA_DIAS=3`
 - `BCMED_BENEFICIO_BATCH_SIZE=50` e `BCMED_BENEFICIO_MAX_BATCHES=20`
 - `BCMED_BENEFICIO_FISIOTERAPEUTA_ID=` (piloto controlado)
+- `BCMED_BENEFICIO_FISIOTERAPEUTA_EMAIL=` (alternativa ao ID para piloto controlado)
 - `BCMED_BENEFICIO_FISIOTERAPEUTA_IDS_EXCLUIDOS=[]`
 - `BCMED_BENEFICIO_BCMED_URL=https://www.bcmed.com.br/fisioterapia`
 - `BCMED_BENEFICIO_URL=https://seudia.de/FisioHelp`
