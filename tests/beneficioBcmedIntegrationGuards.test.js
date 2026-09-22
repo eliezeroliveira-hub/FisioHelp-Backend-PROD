@@ -85,12 +85,15 @@ test('ACS usa idempotencia, retomada e timeout por requisicao', () => {
   assert.match(emailProviderSource, /operationId:/);
   assert.match(emailProviderSource, /resumeFrom:/);
   assert.match(emailProviderSource, /abortSignal/);
+  assert.match(emailProviderSource, /getSendResult/);
+  assert.match(emailProviderSource, /consultarOperacaoAcsExistente/);
   assert.match(reliabilitySource, /poller\.poll\(\{ abortSignal \}\)/);
   assert.match(reliabilitySource, /Promise\.race/);
 
   assert.match(serviceSource, /criarOperationIdFilaNotificacao\(filaId, ENV\.DB_NAME\)/);
   assert.match(serviceSource, /\$\.acsEmail/);
   assert.match(serviceSource, /salvarEstadoAcsEmail/);
+  assert.match(serviceSource, /consultarOperationIdAntesDeEnviar/);
 });
 
 test('worker limita o tick e devolve itens ainda nao iniciados', () => {

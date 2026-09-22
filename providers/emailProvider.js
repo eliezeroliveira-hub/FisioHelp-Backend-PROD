@@ -4,6 +4,7 @@ import { ENV } from '../config/env.js';
 import { log } from '../config/logger.js';
 import {
   aguardarPollerAcs,
+  consultarOperacaoAcsExistente,
   executarComAbortTimeout,
 } from '../utils/acsEmailReliability.js';
 
@@ -187,6 +188,7 @@ export async function enviarEmail({
   anexos = null,
   operationId = null,
   resumeFrom = null,
+  consultarOperationIdAntesDeEnviar = false,
   onPollerReady = null,
 }) {
   const email = String(destinatario || '').trim();
@@ -216,6 +218,43 @@ export async function enviarEmail({
     }
 
     try {
+      if (operationId && !resumeFrom && consultarOperationIdAntesDeEnviar) {
+        const emailOperations = getAcsClient()?.generatedClient?.email;
+        if (!emailOperations || typeof emailOperations.getSendResult !== 'function') {
+          throw new Error('SDK ACS não expõe consulta de status por operationId.');
+        }
+
+        const existente = await consultarOperacaoAcsExistente(
+          (id, options) => emailOperations.getSendResult(id, options),
+          operationId,
+          {
+            totalTimeoutMs: ENV.ACS_EMAIL_TOTAL_TIMEOUT_MS,
+            requestTimeoutMs: ENV.ACS_EMAIL_REQUEST_TIMEOUT_MS,
+            intervalMs: 5_000,
+          }
+        );
+
+        if (existente?.status === 'Succeeded') {
+          log('info', '[email:acs] operação existente confirmada pelo ACS', {
+            destinatario: mascararEmail(email),
+            messageId: existente?.id || null,
+          });
+          return { resultado: 'sucesso', messageId: existente?.id || null };
+        }
+
+        if (existente?.status !== 'NotFound') {
+          return {
+            resultado: erroAcsParaResultado(existente?.error),
+            erro: existente?.error?.message ||
+              `Operação ACS existente finalizada com status ${existente?.status || 'desconhecido'}.`,
+          };
+        }
+
+        log('info', '[email:acs] operationId não encontrado; nova submissão autorizada', {
+          destinatario: mascararEmail(email),
+        });
+      }
+
       const message = {
         senderAddress: ENV.ACS_SENDER_ADDRESS,
         content: {

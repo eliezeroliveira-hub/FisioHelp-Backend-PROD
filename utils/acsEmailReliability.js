@@ -121,9 +121,71 @@ export async function aguardarPollerAcs(poller, {
   return poller.getResult();
 }
 
+export async function consultarOperacaoAcsExistente(consultar, operationId, {
+  totalTimeoutMs = 90_000,
+  requestTimeoutMs = 30_000,
+  intervalMs = 5_000,
+  now = () => Date.now(),
+  delayFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+} = {}) {
+  if (typeof consultar !== 'function') {
+    throw new TypeError('consultar deve ser uma função.');
+  }
+
+  const operacao = String(operationId || '').trim();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(operacao)) {
+    throw new Error('operationId ACS inválido para consulta.');
+  }
+
+  const totalMs = toPositiveInteger(totalTimeoutMs, 90_000);
+  const requisicaoMs = Math.min(toPositiveInteger(requestTimeoutMs, 30_000), totalMs);
+  const intervaloMs = toPositiveInteger(intervalMs, 5_000);
+  const deadline = now() + totalMs;
+
+  while (true) {
+    const restanteMs = deadline - now();
+    if (restanteMs <= 0) {
+      return {
+        status: 'TimedOut',
+        error: new AcsEmailTimeoutError('Timeout total ao consultar operação existente do ACS.'),
+      };
+    }
+
+    let result;
+    try {
+      result = await executarComAbortTimeout(
+        (abortSignal) => consultar(operacao, { abortSignal }),
+        {
+          timeoutMs: Math.min(requisicaoMs, restanteMs),
+          descricao: 'Consulta de operação existente do ACS',
+        }
+      );
+    } catch (error) {
+      const statusCode = Number(error?.statusCode || error?.status || 0);
+      const code = String(error?.code || error?.name || '').trim().toLowerCase();
+      if (statusCode === 404 || code === 'notfound' || code === 'resourcenotfound') {
+        return { status: 'NotFound' };
+      }
+      if (error?.code === 'ACS_EMAIL_TIMEOUT' || error?.name === 'AbortError') {
+        return { status: 'TimedOut', error };
+      }
+      throw error;
+    }
+
+    const status = String(result?.status || '').trim();
+    if (!['NotStarted', 'Running'].includes(status)) {
+      return result || { status: 'Unknown' };
+    }
+
+    const esperaMs = Math.min(intervaloMs, Math.max(0, deadline - now()));
+    if (esperaMs > 0) await delayFn(esperaMs);
+  }
+}
+
 export default {
   AcsEmailTimeoutError,
   criarOperationIdFilaNotificacao,
   executarComAbortTimeout,
   aguardarPollerAcs,
+  consultarOperacaoAcsExistente,
 };

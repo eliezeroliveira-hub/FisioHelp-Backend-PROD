@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   aguardarPollerAcs,
+  consultarOperacaoAcsExistente,
   criarOperationIdFilaNotificacao,
   executarComAbortTimeout,
 } from '../utils/acsEmailReliability.js';
@@ -80,5 +81,42 @@ test('poll concluido recebe AbortSignal e devolve resultado do ACS', async () =>
   });
 
   assert.equal(observedSignal.aborted, false);
+  assert.deepEqual(result, expected);
+});
+
+test('consulta de operationId inexistente autoriza nova submissao', async () => {
+  const operationId = criarOperationIdFilaNotificacao(321, 'mvpdb-hml');
+  const result = await consultarOperacaoAcsExistente(async () => {
+    const error = new Error('Not found');
+    error.statusCode = 404;
+    throw error;
+  }, operationId, {
+    totalTimeoutMs: 100,
+    requestTimeoutMs: 50,
+    intervalMs: 1,
+  });
+
+  assert.deepEqual(result, { status: 'NotFound' });
+});
+
+test('consulta de operationId acompanha Running ate Succeeded sem novo POST', async () => {
+  const operationId = criarOperationIdFilaNotificacao(322, 'mvpdb-hml');
+  let calls = 0;
+  let clock = 0;
+  const expected = { status: 'Succeeded', id: 'message-existing' };
+
+  const result = await consultarOperacaoAcsExistente(async (_id, { abortSignal }) => {
+    assert.equal(abortSignal.aborted, false);
+    calls += 1;
+    return calls === 1 ? { status: 'Running' } : expected;
+  }, operationId, {
+    totalTimeoutMs: 100,
+    requestTimeoutMs: 50,
+    intervalMs: 1,
+    now: () => clock,
+    delayFn: async (ms) => { clock += ms; },
+  });
+
+  assert.equal(calls, 2);
   assert.deepEqual(result, expected);
 });

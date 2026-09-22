@@ -689,7 +689,7 @@ async function salvarEstadoAcsEmail(id, { operationId, resumeFrom }, usuario = n
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(operacao)) {
     throw new Error('operationId ACS inválido.');
   }
-  if (!estado || estado.length > 100_000) {
+  if (estado.length > 100_000) {
     throw new Error('Estado serializado do poller ACS inválido.');
   }
 
@@ -697,7 +697,7 @@ async function salvarEstadoAcsEmail(id, { operationId, resumeFrom }, usuario = n
   await queryWithContext(ctx, (req) => {
     req.input('Id', sql.Int, filaId);
     req.input('OperationId', sql.NVarChar(36), operacao);
-    req.input('ResumeFrom', sql.NVarChar(sql.MAX), estado);
+    req.input('ResumeFrom', sql.NVarChar(sql.MAX), estado || null);
   }, `
     DECLARE @EstadoAcs nvarchar(max) = (
       SELECT
@@ -785,6 +785,7 @@ async function processarEmailItem(item, usuario = null) {
   const dados = parseDadosJsonSeguro(item.DadosJson) || {};
   const operationId = criarOperationIdFilaNotificacao(filaId, ENV.DB_NAME);
   const resumeFrom = String(dados?.acsEmail?.resumeFrom || '').trim() || null;
+  const operationIdPersistido = String(dados?.acsEmail?.operationId || '').trim();
   const resolucao = await resolverEmailUsuario(item.UsuarioTipo, item.UsuarioId);
 
   if (!resolucao.email) {
@@ -800,6 +801,14 @@ async function processarEmailItem(item, usuario = null) {
 
   let resultado;
   try {
+    if (operationIdPersistido !== operationId) {
+      await salvarEstadoAcsEmail(
+        filaId,
+        { operationId, resumeFrom },
+        usuario
+      );
+    }
+
     resultado = await enviarEmail({
       destinatario: resolucao.email,
       assunto: template.assunto,
@@ -808,6 +817,7 @@ async function processarEmailItem(item, usuario = null) {
       anexos: template.anexos,
       operationId,
       resumeFrom,
+      consultarOperationIdAntesDeEnviar: Number(item.Tentativas || 0) > 0 && !resumeFrom,
       onPollerReady: (estadoAcs) => salvarEstadoAcsEmail(
         filaId, estadoAcs, usuario
       ),
