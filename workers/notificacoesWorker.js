@@ -4,6 +4,7 @@ import { isEmailProviderReal } from '../providers/emailProvider.js';
 import { isProviderReal as isPushProviderReal } from '../providers/pushProvider.js';
 import { isWhatsAppProviderReal } from '../providers/whatsappProvider.js';
 import notificacoesService from '../services/notificacoesService.js';
+import { obterControleDespachoBeneficioBcmed } from '../utils/beneficioBcmedCampaign.js';
 
 function boolEnv(value, fallback = true) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -32,6 +33,7 @@ let timer = null;
 let running = false;
 let missingStructureWarned = false;
 let noActiveChannelsWarned = false;
+let bcmedConfigWarning = null;
 
 function usuarioSistema() {
   return { tipo: 'Admin', id: Number(ENV.SYSTEM_ADMIN_ID ?? 1) };
@@ -83,8 +85,22 @@ export async function tick() {
     }
     noActiveChannelsWarned = false;
 
+    const controleBcmed = obterControleDespachoBeneficioBcmed(process.env, new Date());
+    if (controleBcmed.configError && bcmedConfigWarning !== controleBcmed.configError) {
+      bcmedConfigWarning = controleBcmed.configError;
+      log('error', 'BCMED_CONFIG_INVALID no processador; itens da campanha permanecerão pendentes.', {
+        erro: controleBcmed.configError,
+      });
+    } else if (!controleBcmed.configError) {
+      bcmedConfigWarning = null;
+    }
+
     const lote = await notificacoesService.reivindicarLote(
-      { batchSize: config.batchSize, canaisAtivos: canais },
+      {
+        batchSize: config.batchSize,
+        canaisAtivos: canais,
+        controleBcmed,
+      },
       usuario
     );
 

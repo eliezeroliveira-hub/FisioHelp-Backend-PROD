@@ -1,3 +1,7 @@
+import { logBuildInfoSafe } from './shared/buildInfo.js';
+
+logBuildInfoSafe();
+
 import './functions/processarFilaNotificacoes.js';
 import './functions/processarFilaContatoTransacional.js';
 import './functions/processarFilaReembolsosGateway.js';
@@ -7,3 +11,4 @@ import './functions/enfileirarLembretesConsulta.js';
 import './functions/enfileirarOrientacaoCheckinFisio.js';
 import './functions/enfileirarLembretePerfilFisioterapeuta.js';
 import './functions/enfileirarProgramaIndicacaoFisioterapeuta.js';
+import './functions/enfileirarBeneficioBcmedFisioterapeuta.js';

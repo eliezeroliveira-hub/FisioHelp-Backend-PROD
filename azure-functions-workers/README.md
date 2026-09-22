@@ -13,6 +13,7 @@ Este pacote e separado do Function App de SQL jobs em `azure-functions/`.
 - `enfileirarLembretesConsulta`: chama `workers/consultasLembretesWorker.tick()`.
 - `enfileirarLembretePerfilFisioterapeuta`: chama `workers/perfilFisioterapeutaLembreteWorker.tick()` a cada 15 minutos.
 - `enfileirarProgramaIndicacaoFisioterapeuta`: chama workers/programaIndicacaoFisioterapeutaWorker.tick() no primeiro dia de cada mês, às 12:00 UTC (09:00 em São Paulo).
+- `enfileirarBeneficioBcmedFisioterapeuta`: chama `workers/beneficioBcmedFisioterapeutaWorker.tick()` diariamente, às 12:00 UTC (09:00 em São Paulo), sem execução no startup.
 
 ## Deploy
 
@@ -82,3 +83,44 @@ próprio `tick()` e usa uma chave idempotente por fisioterapeuta, canal e compet
 A Function usa `runOnStartup`, mas o worker só executa no primeiro dia do mês ou quando
 a competência de lançamento coincide com o mês atual. Remova a competência de lançamento
 após confirmar o envio inaugural.
+
+O fluxo `enfileirarBeneficioBcmedFisioterapeuta` valida todas as configurações dentro
+do próprio `tick()`, confere os dois links antes de enfileirar e usa uma chave
+idempotente por campanha, data inicial, fisioterapeuta, canal e ciclo. O dia previsto e
+os três dias seguintes são válidos, sem ultrapassar a data final. Configurações:
+
+- `BCMED_BENEFICIO_WORKER_ENABLED=false`
+- `BCMED_BENEFICIO_EMAIL_ENABLED=true`
+- `BCMED_BENEFICIO_PUSH_ENABLED=true`
+- `BCMED_BENEFICIO_CAMPANHA_ID=`
+- `BCMED_BENEFICIO_DATA_INICIAL=` e `BCMED_BENEFICIO_DATA_FINAL=` (YYYY-MM-DD)
+- `BCMED_BENEFICIO_EMAIL_INTERVAL_DAYS=20`
+- `BCMED_BENEFICIO_PUSH_INTERVAL_DAYS=10`
+- `BCMED_BENEFICIO_TOLERANCIA_DIAS=3`
+- `BCMED_BENEFICIO_BATCH_SIZE=50` e `BCMED_BENEFICIO_MAX_BATCHES=20`
+- `BCMED_BENEFICIO_FISIOTERAPEUTA_ID=` (piloto controlado)
+- `BCMED_BENEFICIO_FISIOTERAPEUTA_IDS_EXCLUIDOS=[]`
+- `BCMED_BENEFICIO_BCMED_URL=https://www.bcmed.com.br/fisioterapia`
+- `BCMED_BENEFICIO_URL=https://seudia.de/FisioHelp`
+- `BCMED_BENEFICIO_WHATSAPP_HOSTS=api.whatsapp.com,wa.me,web.whatsapp.com`
+- `BCMED_BENEFICIO_WHATSAPP_PHONE_SHA256=` (obrigatório quando ativado)
+- `BCMED_BENEFICIO_WHATSAPP_MESSAGE_TOKEN=FisioHelp`
+- `BCMED_BENEFICIO_LINK_CHECK_TIMEOUT_MS=5000`
+
+O push não carrega URL e só é criado depois que já existe um e-mail enviado na mesma
+campanha. Somente o push do ciclo inicial é gravado na caixa interna de notificações.
+Desabilitar o worker ou um canal impede que itens BCMED pendentes sejam reivindicados;
+isso não afeta as demais notificações.
+
+Para cancelar itens pendentes, primeiro desligue as flags, espere mais que o prazo de
+recuperação de itens travados (10 minutos) e execute duas rodadas do script, sempre
+começando por dry-run:
+
+```bash
+node scripts/notificacoes/cancelarBeneficioBcmedPendentes.mjs --campaign-id beneficio-bcmed-2026 --expected-database mvpdb-hml
+node scripts/notificacoes/cancelarBeneficioBcmedPendentes.mjs --campaign-id beneficio-bcmed-2026 --expected-database mvpdb-hml --execute --confirm-campaign-id beneficio-bcmed-2026
+```
+
+O empacotamento recusa uma árvore Git suja e grava `BUILD_INFO.json` com repositório
+sanitizado, branch, upstream, commit e horário do build. A inicialização registra esse
+marcador sem impedir o host caso o arquivo esteja indisponível.

@@ -370,7 +370,14 @@ async function recuperarProcessandoTravado({ staleMinutes = 10 } = {}, usuario =
   return Number(result.recordset?.[0]?.Recuperados ?? 0);
 }
 
-async function reivindicarLote({ batchSize = 10, canaisAtivos = ['push'] } = {}, usuario = null) {
+async function reivindicarLote(
+  {
+    batchSize = 10,
+    canaisAtivos = ['push'],
+    controleBcmed = null,
+  } = {},
+  usuario = null
+) {
   const ctx = usuario?.tipo && usuario?.id ? usuario : contextoSistema();
   const size = Math.max(1, Math.min(Number(batchSize) || 10, 50));
   const canais = normalizarCanaisAtivos(canaisAtivos);
@@ -378,9 +385,19 @@ async function reivindicarLote({ batchSize = 10, canaisAtivos = ['push'] } = {},
   if (canais.length === 0) return [];
 
   const placeholders = canais.map((_, i) => `@Canal${i}`).join(', ');
+  const hojeBrasil = String(controleBcmed?.hojeBrasil || '').trim();
+  const hojeBrasilDate = /^\d{4}-\d{2}-\d{2}$/.test(hojeBrasil)
+    ? new Date(`${hojeBrasil}T00:00:00.000Z`)
+    : new Date();
+  const bcmedEmailEnabled = controleBcmed?.emailEnabled === true;
+  const bcmedPushEnabled = controleBcmed?.pushEnabled === true;
 
   const result = await queryWithContext(ctx, (req) => {
     req.input('BatchSize', sql.Int, size);
+    req.input('HojeBrasil', sql.Date, hojeBrasilDate);
+    req.input('BcmedDadosTipo', sql.NVarChar(100), 'campanha_beneficio_bcmed');
+    req.input('BcmedEmailEnabled', sql.Bit, bcmedEmailEnabled);
+    req.input('BcmedPushEnabled', sql.Bit, bcmedPushEnabled);
     canais.forEach((canal, i) => {
       req.input(`Canal${i}`, sql.NVarChar(10), canal);
     });
@@ -392,6 +409,37 @@ async function reivindicarLote({ batchSize = 10, canaisAtivos = ['push'] } = {},
         AND [Status] IN (N'Pendente', N'FalhaTemporaria')
         AND [Tentativas] < [MaxTentativas]
         AND ([ProximaTentativaEm] IS NULL OR [ProximaTentativaEm] <= SYSDATETIME())
+        AND (
+          COALESCE(
+            CASE
+              WHEN ISJSON([DadosJson]) = 1 THEN JSON_VALUE([DadosJson], '$.tipo')
+            END,
+            N''
+          ) <> @BcmedDadosTipo
+          OR (
+            CASE
+              WHEN ISJSON([DadosJson]) = 1 THEN JSON_VALUE([DadosJson], '$.tipo')
+            END = @BcmedDadosTipo
+            AND (
+              ([Canal] = N'email' AND @BcmedEmailEnabled = 1)
+              OR ([Canal] = N'push' AND @BcmedPushEnabled = 1)
+            )
+            AND TRY_CONVERT(
+              date,
+              CASE
+                WHEN ISJSON([DadosJson]) = 1 THEN JSON_VALUE([DadosJson], '$.expiraEm')
+              END,
+              23
+            ) IS NOT NULL
+            AND TRY_CONVERT(
+              date,
+              CASE
+                WHEN ISJSON([DadosJson]) = 1 THEN JSON_VALUE([DadosJson], '$.expiraEm')
+              END,
+              23
+            ) >= @HojeBrasil
+          )
+        )
       ORDER BY [ProximaTentativaEm] ASC, [CriadoEm] ASC
     )
     UPDATE f
