@@ -132,7 +132,7 @@ test('valida o redirecionamento sem requisitar o WhatsApp', async () => {
   const calls = [];
   const config = {
     bcmedUrl: 'https://www.bcmed.com.br/fisioterapia',
-    beneficioUrl: 'https://seudia.de/FisioHelp',
+    beneficioUrl: 'https://compreno.link/FisioHelp',
     whatsappHosts: new Set(['api.whatsapp.com']),
     whatsappPhoneSha256: crypto.createHash('sha256').update(phone).digest('hex'),
     whatsappMessageToken: 'FisioHelp',
@@ -156,7 +156,7 @@ test('falha fechada quando o número ou host do destino diverge', async () => {
   const expectedHash = crypto.createHash('sha256').update('5531999999999').digest('hex');
   const config = {
     bcmedUrl: 'https://www.bcmed.com.br/fisioterapia',
-    beneficioUrl: 'https://seudia.de/FisioHelp',
+    beneficioUrl: 'https://compreno.link/FisioHelp',
     whatsappHosts: new Set(['api.whatsapp.com']),
     whatsappPhoneSha256: expectedHash,
     whatsappMessageToken: 'FisioHelp',

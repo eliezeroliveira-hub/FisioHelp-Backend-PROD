@@ -137,6 +137,11 @@ const emailReplyTo = optionalEnv('EMAIL_REPLY_TO');
 const acsConnectionString = optionalEnv('ACS_CONNECTION_STRING');
 const acsSenderAddress = optionalEnv('ACS_SENDER_ADDRESS');
 const acsEventGridWebhookSecret = requiredInProduction('ACS_EVENTGRID_WEBHOOK_SECRET');
+const acsEmailRequestTimeoutMs = parsePositiveIntEnv('ACS_EMAIL_REQUEST_TIMEOUT_MS', 30_000);
+const acsEmailTotalTimeoutMs = parsePositiveIntEnv('ACS_EMAIL_TOTAL_TIMEOUT_MS', 90_000);
+if (acsEmailRequestTimeoutMs > acsEmailTotalTimeoutMs) {
+  throw new Error('ACS_EMAIL_REQUEST_TIMEOUT_MS não pode exceder ACS_EMAIL_TOTAL_TIMEOUT_MS.');
+}
 const sesSnsTopicArn = optionalEnv('SES_SNS_TOPIC_ARN');
 const twilioAccountSid = optionalEnv('TWILIO_ACCOUNT_SID');
 const twilioAuthToken = optionalEnv('TWILIO_AUTH_TOKEN');
@@ -295,6 +300,8 @@ export const ENV = {
   ACS_CONNECTION_STRING: acsConnectionString,
   ACS_SENDER_ADDRESS: acsSenderAddress,
   ACS_EVENTGRID_WEBHOOK_SECRET: acsEventGridWebhookSecret,
+  ACS_EMAIL_REQUEST_TIMEOUT_MS: acsEmailRequestTimeoutMs,
+  ACS_EMAIL_TOTAL_TIMEOUT_MS: acsEmailTotalTimeoutMs,
   SES_SNS_TOPIC_ARN: sesSnsTopicArn,
   TWILIO_ACCOUNT_SID: twilioAccountSid,
   TWILIO_AUTH_TOKEN: twilioAuthToken,
@@ -313,6 +320,7 @@ export const ENV = {
   NOTIF_WORKER_INTERVAL_MS: process.env.NOTIF_WORKER_INTERVAL_MS,
   NOTIF_WORKER_STALE_MINUTES: process.env.NOTIF_WORKER_STALE_MINUTES,
   NOTIF_WORKER_BATCH_SIZE: process.env.NOTIF_WORKER_BATCH_SIZE,
+  NOTIF_WORKER_MAX_TICK_MS: process.env.NOTIF_WORKER_MAX_TICK_MS,
   AVALIACAO_WORKER_ENABLED: process.env.AVALIACAO_WORKER_ENABLED,
   AVALIACAO_WORKER_EMAIL_ENABLED: process.env.AVALIACAO_WORKER_EMAIL_ENABLED,
   AVALIACAO_WORKER_INTERVAL_MS: process.env.AVALIACAO_WORKER_INTERVAL_MS,

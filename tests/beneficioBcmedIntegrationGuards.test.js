@@ -27,6 +27,14 @@ const pushProviderSource = readFileSync(
   new URL('../providers/pushProvider.js', import.meta.url),
   'utf8'
 );
+const notificationWorkerSource = readFileSync(
+  new URL('../workers/notificacoesWorker.js', import.meta.url),
+  'utf8'
+);
+const reliabilitySource = readFileSync(
+  new URL('../utils/acsEmailReliability.js', import.meta.url),
+  'utf8'
+);
 
 test('claim filtra BCMED antes do TOP com JSON seguro, pausa e expiração', () => {
   const topIndex = serviceSource.indexOf('SELECT TOP (@BatchSize)');
@@ -70,6 +78,28 @@ test('providers existentes tratam limites como falha temporária', () => {
   assert.match(emailProviderSource, /tempFalha/);
   assert.match(pushProviderSource, /status === 429/);
   assert.match(pushProviderSource, /tempFalha/);
+});
+
+test('ACS usa idempotencia, retomada e timeout por requisicao', () => {
+  assert.match(emailProviderSource, /beginSend\(message, \{/);
+  assert.match(emailProviderSource, /operationId:/);
+  assert.match(emailProviderSource, /resumeFrom:/);
+  assert.match(emailProviderSource, /abortSignal/);
+  assert.match(reliabilitySource, /poller\.poll\(\{ abortSignal \}\)/);
+  assert.match(reliabilitySource, /Promise\.race/);
+
+  assert.match(serviceSource, /criarOperationIdFilaNotificacao\(filaId, ENV\.DB_NAME\)/);
+  assert.match(serviceSource, /\$\.acsEmail/);
+  assert.match(serviceSource, /salvarEstadoAcsEmail/);
+});
+
+test('worker limita o tick e devolve itens ainda nao iniciados', () => {
+  assert.match(notificationWorkerSource, /NOTIF_WORKER_MAX_TICK_MS/);
+  assert.match(notificationWorkerSource, /480_000/);
+  assert.match(notificationWorkerSource, /devolverProcessandoParaPendente/);
+  assert.match(notificationWorkerSource, /lote\.slice\(index\)/);
+  assert.match(serviceSource, /OPENJSON\(@IdsJson\)/);
+  assert.match(serviceSource, /fn\.\[Status\] = N'Pendente'/);
 });
 
 test('sanitiza credenciais do remoto no BUILD_INFO', () => {

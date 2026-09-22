@@ -43,6 +43,19 @@ As variaveis `*_WORKER_ENABLED` dos fluxos legados controlam apenas os timers in
 via `start*Worker()`. As Functions legadas chamam `tick()` diretamente e nao dependem dessas
 flags para executar.
 
+O processador geral de notificacoes limita cada operacao de rede do ACS e tambem
+o tempo total de espera pelo aceite. O `operationId` e deterministico por banco e
+linha da fila, e o estado serializado do poller fica em `DadosJson`, permitindo
+retomar uma tentativa sem submeter outro e-mail quando a resposta de rede for
+interrompida. Configuracoes:
+
+- `ACS_EMAIL_REQUEST_TIMEOUT_MS=30000`
+- `ACS_EMAIL_TOTAL_TIMEOUT_MS=90000`
+- `NOTIF_WORKER_BATCH_SIZE=5`
+- `NOTIF_WORKER_MAX_TICK_MS=480000`
+
+Itens reivindicados e ainda nao iniciados voltam a `Pendente` ao atingir o limite do tick.
+
 O fluxo `enfileirarOrientacaoCheckinFisio` é independente do lembrete de consulta de
 24 horas. Ele valida `CHECKIN_ORIENTACAO_WORKER_ENABLED` dentro do próprio `tick()` e
 enfileira uma única orientação por consulta/canal quando a consulta entra na janela de
@@ -102,7 +115,7 @@ os três dias seguintes são válidos, sem ultrapassar a data final. Configuraç
 - `BCMED_BENEFICIO_FISIOTERAPEUTA_EMAIL=` (alternativa ao ID para piloto controlado)
 - `BCMED_BENEFICIO_FISIOTERAPEUTA_IDS_EXCLUIDOS=[]`
 - `BCMED_BENEFICIO_BCMED_URL=https://www.bcmed.com.br/fisioterapia`
-- `BCMED_BENEFICIO_URL=https://seudia.de/FisioHelp`
+- `BCMED_BENEFICIO_URL=https://compreno.link/FisioHelp`
 - `BCMED_BENEFICIO_WHATSAPP_HOSTS=api.whatsapp.com,wa.me,web.whatsapp.com`
 - `BCMED_BENEFICIO_WHATSAPP_PHONE_SHA256=` (obrigatório quando ativado)
 - `BCMED_BENEFICIO_WHATSAPP_MESSAGE_TOKEN=FisioHelp`

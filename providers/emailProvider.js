@@ -2,6 +2,10 @@ import { EmailClient } from '@azure/communication-email';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { ENV } from '../config/env.js';
 import { log } from '../config/logger.js';
+import {
+  aguardarPollerAcs,
+  executarComAbortTimeout,
+} from '../utils/acsEmailReliability.js';
 
 const MODE = String(ENV.EMAIL_PROVIDER_MODE || 'stub').trim().toLowerCase();
 
@@ -130,30 +134,6 @@ function prepararAssunto(assunto) {
   return (normalized || 'Mensagem da FisioHelp').slice(0, 200);
 }
 
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function aguardarAcs(poller, { timeoutMs = 180_000, intervalMs = 10_000 } = {}) {
-  const deadline = Date.now() + timeoutMs;
-
-  while (!poller.isDone()) {
-    if (Date.now() > deadline) {
-      return {
-        status: 'TimedOut',
-        error: { code: 'TimeoutError', message: 'Timeout ao aguardar aceite do ACS.' },
-      };
-    }
-
-    await poller.poll();
-    if (!poller.isDone()) {
-      await delay(intervalMs);
-    }
-  }
-
-  return poller.getResult();
-}
-
 function prepararAnexos(anexos) {
   if (anexos === null || anexos === undefined) return [];
   if (!Array.isArray(anexos)) {
@@ -199,7 +179,16 @@ function prepararAnexos(anexos) {
 }
 
 // resultado: 'sucesso' | 'invalido' | 'tempFalha' | 'permFalha'
-export async function enviarEmail({ destinatario, assunto, corpoHtml, corpoTexto, anexos = null }) {
+export async function enviarEmail({
+  destinatario,
+  assunto,
+  corpoHtml,
+  corpoTexto,
+  anexos = null,
+  operationId = null,
+  resumeFrom = null,
+  onPollerReady = null,
+}) {
   const email = String(destinatario || '').trim();
   const assuntoNormalizado = prepararAssunto(assunto);
   const anexosPreparados = prepararAnexos(anexos);
@@ -241,8 +230,34 @@ export async function enviarEmail({ destinatario, assunto, corpoHtml, corpoTexto
         replyTo: ENV.EMAIL_REPLY_TO ? [{ address: ENV.EMAIL_REPLY_TO }] : undefined,
       };
 
-      const poller = await getAcsClient().beginSend(message);
-      const result = await aguardarAcs(poller);
+      const options = {
+        operationId: operationId || undefined,
+        resumeFrom: resumeFrom || undefined,
+        updateIntervalInMs: 5_000,
+      };
+      const poller = await executarComAbortTimeout(
+        (abortSignal) => getAcsClient().beginSend(message, {
+          ...options,
+          abortSignal,
+        }),
+        {
+          timeoutMs: ENV.ACS_EMAIL_REQUEST_TIMEOUT_MS,
+          descricao: 'Início do envio pelo ACS',
+        }
+      );
+
+      if (typeof onPollerReady === 'function') {
+        await onPollerReady({
+          operationId: operationId || null,
+          resumeFrom: poller.toString(),
+        });
+      }
+
+      const result = await aguardarPollerAcs(poller, {
+        totalTimeoutMs: ENV.ACS_EMAIL_TOTAL_TIMEOUT_MS,
+        requestTimeoutMs: ENV.ACS_EMAIL_REQUEST_TIMEOUT_MS,
+        intervalMs: 5_000,
+      });
 
       if (result?.status === 'TimedOut') {
         log('warn', '[email:acs] timeout-aceite-indeterminado — e-mail pode ter sido aceito', {

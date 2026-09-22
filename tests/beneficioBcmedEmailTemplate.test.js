@@ -17,7 +17,7 @@ test('monta lançamento BCMED com links, WhatsApp e sem tokens residuais', () =>
     (email.corpoHtml.match(/https:\/\/www\.bcmed\.com\.br\/fisioterapia/g) || []).length,
     3
   );
-  assert.match(email.corpoHtml, /https:\/\/seudia\.de\/FisioHelp/);
+  assert.match(email.corpoHtml, /https:\/\/compreno\.link\/FisioHelp/);
   assert.match(email.corpoHtml, /solicite o descadastro/);
   assert.doesNotMatch(email.corpoHtml, /\{\{[^}]+\}\}/);
   assert.doesNotMatch(email.corpoHtml, /🧡 Equipe FisioHelp/);

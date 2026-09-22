@@ -4,6 +4,7 @@ import { log } from '../config/logger.js';
 import { enviarEmail } from '../providers/emailProvider.js';
 import { enviarPush } from '../providers/pushProvider.js';
 import { enviarWhatsApp } from '../providers/whatsappProvider.js';
+import { criarOperationIdFilaNotificacao } from '../utils/acsEmailReliability.js';
 import { HttpError } from '../utils/httpError.js';
 import { isValidEmail, normalizeEmail } from '../utils/identityValidators.js';
 import { queryWithContext } from './_queryWithContext.js';
@@ -370,6 +371,35 @@ async function recuperarProcessandoTravado({ staleMinutes = 10 } = {}, usuario =
   return Number(result.recordset?.[0]?.Recuperados ?? 0);
 }
 
+async function devolverProcessandoParaPendente(ids, motivo, usuario = null) {
+  const normalizados = [...new Set((Array.isArray(ids) ? ids : [])
+    .map((id) => Number(id))
+    .filter((id) => Number.isInteger(id) && id > 0))];
+  if (normalizados.length === 0) return 0;
+
+  const ctx = usuario?.tipo && usuario?.id ? usuario : contextoSistema();
+  const result = await queryWithContext(ctx, (req) => {
+    req.input('IdsJson', sql.NVarChar(sql.MAX), JSON.stringify(normalizados));
+    req.input('Motivo', sql.NVarChar(500), normalizarErro(motivo));
+  }, `
+    UPDATE fn
+    SET
+      fn.[Status] = N'Pendente',
+      fn.[ProcessandoEm] = NULL,
+      fn.[ProximaTentativaEm] = SYSDATETIME(),
+      fn.[UltimoErro] = @Motivo,
+      fn.[AtualizadoEm] = SYSDATETIME()
+    FROM [dbo].[FilaNotificacoes] fn
+    INNER JOIN OPENJSON(@IdsJson) ids
+      ON TRY_CONVERT(int, ids.[value]) = fn.[Id]
+    WHERE fn.[Status] = N'Processando';
+
+    SELECT @@ROWCOUNT AS Devolvidos;
+  `, { requireContext: true });
+
+  return Number(result.recordset?.[0]?.Devolvidos ?? 0);
+}
+
 async function reivindicarLote(
   {
     batchSize = 10,
@@ -652,6 +682,43 @@ async function marcarFalhaTemporaria(id, erro, backoffSeg = 60, usuario = null) 
   `, { requireContext: true });
 }
 
+async function salvarEstadoAcsEmail(id, { operationId, resumeFrom }, usuario = null) {
+  const filaId = normalizarIdPositivo(id, 'filaId');
+  const operacao = String(operationId || '').trim();
+  const estado = String(resumeFrom || '').trim();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(operacao)) {
+    throw new Error('operationId ACS inválido.');
+  }
+  if (!estado || estado.length > 100_000) {
+    throw new Error('Estado serializado do poller ACS inválido.');
+  }
+
+  const ctx = usuario?.tipo && usuario?.id ? usuario : contextoSistema();
+  await queryWithContext(ctx, (req) => {
+    req.input('Id', sql.Int, filaId);
+    req.input('OperationId', sql.NVarChar(36), operacao);
+    req.input('ResumeFrom', sql.NVarChar(sql.MAX), estado);
+  }, `
+    DECLARE @EstadoAcs nvarchar(max) = (
+      SELECT
+        @OperationId AS operationId,
+        @ResumeFrom AS resumeFrom,
+        CONVERT(nvarchar(33), SYSUTCDATETIME(), 126) AS atualizadoEm
+      FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+    );
+
+    UPDATE [dbo].[FilaNotificacoes]
+    SET
+      [DadosJson] = JSON_MODIFY(
+        CASE WHEN ISJSON([DadosJson]) = 1 THEN [DadosJson] ELSE N'{}' END,
+        '$.acsEmail',
+        JSON_QUERY(@EstadoAcs)
+      ),
+      [AtualizadoEm] = SYSDATETIME()
+    WHERE [Id] = @Id;
+  `, { requireContext: true });
+}
+
 async function processarPushItem(item, usuario = null) {
   const filaId = normalizarIdPositivo(item?.Id, 'filaId');
   const dispositivos = await listarDispositivosAtivos(item.UsuarioTipo, item.UsuarioId, usuario);
@@ -715,6 +782,9 @@ async function processarPushItem(item, usuario = null) {
 
 async function processarEmailItem(item, usuario = null) {
   const filaId = normalizarIdPositivo(item?.Id, 'filaId');
+  const dados = parseDadosJsonSeguro(item.DadosJson) || {};
+  const operationId = criarOperationIdFilaNotificacao(filaId, ENV.DB_NAME);
+  const resumeFrom = String(dados?.acsEmail?.resumeFrom || '').trim() || null;
   const resolucao = await resolverEmailUsuario(item.UsuarioTipo, item.UsuarioId);
 
   if (!resolucao.email) {
@@ -725,7 +795,7 @@ async function processarEmailItem(item, usuario = null) {
   const template = montarEmailNotificacao({
     titulo: item.Titulo,
     mensagem: item.Mensagem,
-    dados: parseDadosJsonSeguro(item.DadosJson),
+    dados,
   });
 
   let resultado;
@@ -736,6 +806,11 @@ async function processarEmailItem(item, usuario = null) {
       corpoHtml: template.corpoHtml,
       corpoTexto: template.corpoTexto,
       anexos: template.anexos,
+      operationId,
+      resumeFrom,
+      onPollerReady: (estadoAcs) => salvarEstadoAcsEmail(
+        filaId, estadoAcs, usuario
+      ),
     });
   } catch (erro) {
     resultado = {
@@ -875,6 +950,7 @@ const notificacoesService = {
   enfileirarNotificacao,
   filaDisponivel,
   recuperarProcessandoTravado,
+  devolverProcessandoParaPendente,
   reivindicarLote,
   listarDispositivosAtivos,
   resolverEmailUsuario,
@@ -893,6 +969,7 @@ export {
   enfileirarNotificacao,
   filaDisponivel,
   recuperarProcessandoTravado,
+  devolverProcessandoParaPendente,
   reivindicarLote,
   listarDispositivosAtivos,
   resolverEmailUsuario,

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 const ASSUNTO_LANCAMENTO = 'Novo benefício FisioHelp: descontos exclusivos na BCMED';
 const ASSUNTO_LEMBRETE = 'Consulte seu benefício FisioHelp na BCMED';
-const BENEFICIO_URL = 'https://seudia.de/FisioHelp';
+const BENEFICIO_URL = 'https://compreno.link/FisioHelp';
 const BCMED_URL = 'https://www.bcmed.com.br/fisioterapia';
 const NOME_TOKEN = '{{NOME_FISIOTERAPEUTA}}';
 const PREHEADER_TOKEN = '{{PREHEADER_CAMPANHA}}';

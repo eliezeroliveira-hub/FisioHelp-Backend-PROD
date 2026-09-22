@@ -8,7 +8,7 @@ export const BCMED_EMAIL_MODELO = 'beneficio_bcmed_fisioterapeuta';
 const CAMPANHA_ID_PATTERN = /^[a-z0-9-]{3,60}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
 const DEFAULT_BCMED_URL = 'https://www.bcmed.com.br/fisioterapia';
-const DEFAULT_BENEFICIO_URL = 'https://seudia.de/FisioHelp';
+const DEFAULT_BENEFICIO_URL = 'https://compreno.link/FisioHelp';
 const DEFAULT_WHATSAPP_HOSTS = ['api.whatsapp.com', 'wa.me', 'web.whatsapp.com'];
 
 export class BcmedCampaignError extends Error {
@@ -355,7 +355,7 @@ export function carregarConfigBeneficioBcmed(env = process.env) {
     beneficioUrl: parseHttpsUrl(
       env.BCMED_BENEFICIO_URL || DEFAULT_BENEFICIO_URL,
       'BCMED_BENEFICIO_URL',
-      new Set(['seudia.de'])
+      new Set(['compreno.link'])
     ),
     whatsappHosts,
     whatsappPhoneSha256,
@@ -459,7 +459,7 @@ function obterTelefoneWhatsapp(url) {
 
 export async function verificarLinksBeneficioBcmed(config, { fetchImpl = fetch } = {}) {
   const bcmedAllowedHosts = new Set(['bcmed.com.br', 'www.bcmed.com.br']);
-  const shortAllowedHosts = new Set(['seudia.de']);
+  const shortAllowedHosts = new Set(['compreno.link']);
   const bcmedUrl = validarUrlAntesDaRequisicao(config.bcmedUrl, bcmedAllowedHosts);
   const beneficioUrl = validarUrlAntesDaRequisicao(config.beneficioUrl, shortAllowedHosts);
 

@@ -26,7 +26,8 @@ const config = {
   enabled: boolEnv(process.env.NOTIF_WORKER_ENABLED, ENV.NODE_ENV !== 'production'),
   intervalMs: intEnv(process.env.NOTIF_WORKER_INTERVAL_MS, 60_000, { min: 5_000, max: 600_000 }),
   staleMinutes: intEnv(process.env.NOTIF_WORKER_STALE_MINUTES, 10, { min: 1, max: 240 }),
-  batchSize: intEnv(process.env.NOTIF_WORKER_BATCH_SIZE, 10, { min: 1, max: 50 }),
+  batchSize: intEnv(process.env.NOTIF_WORKER_BATCH_SIZE, 5, { min: 1, max: 50 }),
+  maxTickMs: intEnv(process.env.NOTIF_WORKER_MAX_TICK_MS, 480_000, { min: 60_000, max: 540_000 }),
 };
 
 let timer = null;
@@ -57,6 +58,7 @@ function canaisAtivos() {
 export async function tick() {
   if (running) return;
   running = true;
+  const iniciadoEm = Date.now();
 
   const usuario = usuarioSistema();
   try {
@@ -104,7 +106,29 @@ export async function tick() {
       usuario
     );
 
-    for (const item of lote) {
+    for (let index = 0; index < lote.length; index += 1) {
+      const item = lote[index];
+      const decorridoMs = Date.now() - iniciadoEm;
+      const reservaItemMs = String(item?.Canal || '').toLowerCase() === 'email'
+        ? ENV.ACS_EMAIL_REQUEST_TIMEOUT_MS + ENV.ACS_EMAIL_TOTAL_TIMEOUT_MS + 10_000
+        : 30_000;
+
+      if (decorridoMs + reservaItemMs > config.maxTickMs) {
+        const restantes = lote.slice(index).map((item) => item.Id);
+        const devolvidos = await notificacoesService.devolverProcessandoParaPendente(
+          restantes,
+          'Item devolvido antes do processamento por limite seguro do tick.',
+          usuario
+        );
+        log('warn', 'Limite seguro do tick atingido; itens não iniciados foram devolvidos.', {
+          devolvidos,
+          maxTickMs: config.maxTickMs,
+          decorridoMs,
+          reservaItemMs,
+        });
+        break;
+      }
+
       try {
         await notificacoesService.processarItem(item, usuario);
       } catch (err) {
@@ -169,6 +193,7 @@ export function startNotificacoesWorker() {
     intervalMs: config.intervalMs,
     staleMinutes: config.staleMinutes,
     batchSize: config.batchSize,
+    maxTickMs: config.maxTickMs,
     pushProviderReal: isPushProviderReal,
     emailProviderReal: isEmailProviderReal,
     whatsappProviderReal: isWhatsAppProviderReal,
