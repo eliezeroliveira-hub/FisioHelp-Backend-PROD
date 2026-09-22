@@ -18,6 +18,10 @@ function requiredArgument(name) {
 }
 
 const execute = process.argv.includes('--execute');
+const dryRun = process.argv.includes('--dry-run');
+if (execute && dryRun) {
+  throw new Error('Use somente --dry-run ou --execute, nunca os dois juntos.');
+}
 const campaignId = requiredArgument('campaign-id');
 const expectedDatabase = requiredArgument('expected-database');
 const actualDatabase = String(process.env.DB_NAME || '').trim();

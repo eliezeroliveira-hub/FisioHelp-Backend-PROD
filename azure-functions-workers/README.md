@@ -117,7 +117,7 @@ recuperação de itens travados (10 minutos) e execute duas rodadas do script, s
 começando por dry-run:
 
 ```bash
-node scripts/notificacoes/cancelarBeneficioBcmedPendentes.mjs --campaign-id beneficio-bcmed-2026 --expected-database mvpdb-hml
+node scripts/notificacoes/cancelarBeneficioBcmedPendentes.mjs --campaign-id beneficio-bcmed-2026 --expected-database mvpdb-hml --dry-run
 node scripts/notificacoes/cancelarBeneficioBcmedPendentes.mjs --campaign-id beneficio-bcmed-2026 --expected-database mvpdb-hml --execute --confirm-campaign-id beneficio-bcmed-2026
 ```
 
