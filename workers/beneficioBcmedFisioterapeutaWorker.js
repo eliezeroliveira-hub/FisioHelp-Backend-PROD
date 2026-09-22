@@ -177,6 +177,69 @@ async function buscarPendencias(usuario, config, contexto) {
   return result.recordset || [];
 }
 
+async function diagnosticarAlvoPiloto(usuario, config) {
+  if (!config.fisioterapeutaIdAlvo && !config.fisioterapeutaEmailAlvo) return null;
+
+  const result = await queryWithContext(
+    usuario,
+    (req) => {
+      req.input('FisioterapeutaIdAlvo', sql.Int, config.fisioterapeutaIdAlvo);
+      req.input(
+        'FisioterapeutaEmailAlvo',
+        sql.NVarChar(320),
+        config.fisioterapeutaEmailAlvo
+      );
+    },
+    `
+      SELECT TOP (1)
+        CAST(ISNULL(f.Ativo, 0) AS bit) AS Ativo,
+        CAST(ISNULL(f.IsBloqueado, 0) AS bit) AS Bloqueado,
+        CAST(ISNULL(f.CrefitoVerificado, 0) AS bit) AS CrefitoVerificado,
+        CAST(ISNULL(f.EmailVerificado, 0) AS bit) AS EmailVerificado,
+        CAST(CASE WHEN EXISTS (
+          SELECT 1
+          FROM dbo.EmailSupressao es
+          WHERE LOWER(LTRIM(RTRIM(es.Email))) = LOWER(LTRIM(RTRIM(f.Email)))
+        ) THEN 1 ELSE 0 END AS bit) AS EmailSuprimido,
+        CAST(CASE WHEN EXISTS (
+          SELECT 1
+          FROM dbo.DispositivosNotificacao dn
+          WHERE dn.UsuarioTipo = N'Fisioterapeuta'
+            AND dn.UsuarioId = f.Id
+            AND dn.Ativo = 1
+        ) THEN 1 ELSE 0 END AS bit) AS TemDispositivoAtivo
+      FROM dbo.Fisioterapeutas f
+      WHERE (@FisioterapeutaIdAlvo IS NULL OR f.Id = @FisioterapeutaIdAlvo)
+        AND (
+          @FisioterapeutaEmailAlvo IS NULL
+          OR LOWER(LTRIM(RTRIM(f.Email))) = @FisioterapeutaEmailAlvo
+        );
+    `,
+    { requireContext: true }
+  );
+
+  const row = result.recordset?.[0];
+  const diagnostico = {
+    encontrado: Boolean(row),
+    ativo: Boolean(row?.Ativo),
+    bloqueado: Boolean(row?.Bloqueado),
+    crefitoVerificado: Boolean(row?.CrefitoVerificado),
+    emailVerificado: Boolean(row?.EmailVerificado),
+    emailSuprimido: Boolean(row?.EmailSuprimido),
+    temDispositivoAtivo: Boolean(row?.TemDispositivoAtivo),
+  };
+  diagnostico.elegivelEmail = Boolean(
+    diagnostico.encontrado &&
+    diagnostico.ativo &&
+    !diagnostico.bloqueado &&
+    diagnostico.crefitoVerificado &&
+    diagnostico.emailVerificado &&
+    !diagnostico.emailSuprimido
+  );
+
+  return diagnostico;
+}
+
 function montarNotificacao(pendencia, canal, config, cicloContexto) {
   const fisioterapeutaId = Number(pendencia.FisioterapeutaId);
   const fisioterapeutaNome =
@@ -392,6 +455,11 @@ export async function tick() {
       return;
     }
     outsideWindowLoggedFor = null;
+
+    const diagnosticoAlvo = await diagnosticarAlvoPiloto(usuario, config);
+    if (diagnosticoAlvo) {
+      log('info', 'Diagnóstico seguro do alvo piloto BCMED', diagnosticoAlvo);
+    }
 
     try {
       await verificarLinksBeneficioBcmed(config);

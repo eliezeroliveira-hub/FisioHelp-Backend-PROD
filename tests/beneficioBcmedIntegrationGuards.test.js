@@ -53,6 +53,9 @@ test('worker lê configuração no tick e protege push, inbox e deduplicação',
   assert.match(workerSource, /sp_getapplock/);
   assert.match(workerSource, /WITH \(UPDLOCK, HOLDLOCK\)/);
   assert.match(workerSource, /FisioterapeutaEmailAlvo/);
+  assert.match(workerSource, /Diagnóstico seguro do alvo piloto BCMED/);
+  assert.match(workerSource, /TemDispositivoAtivo/);
+  assert.match(workerSource, /fisioterapeutaEmailAlvoConfigurado: Boolean/);
   assert.match(workerSource, /BCMED_LINK_CHECK_FAILED/);
   assert.match(workerSource, /BCMED_ENQUEUE_FAILED/);
 });
