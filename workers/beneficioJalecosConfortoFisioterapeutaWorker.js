@@ -264,8 +264,12 @@ function montarNotificacao(pendencia, canal, config, cicloContexto) {
       expiraEm: cicloContexto.expiraEm,
       fisioterapeutaId,
       fisioterapeutaNome,
-      beneficioUrl: config.beneficioUrl,
-      cupom: config.cupom,
+      ...(canal === 'email'
+        ? {
+            beneficioUrl: config.beneficioUrl,
+            cupom: config.cupom,
+          }
+        : {}),
       origem: 'beneficioJalecosConfortoFisioterapeutaWorker',
     },
   };

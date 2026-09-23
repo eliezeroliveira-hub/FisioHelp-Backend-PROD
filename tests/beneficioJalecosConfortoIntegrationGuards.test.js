@@ -72,6 +72,10 @@ test('worker Jalecos protege push, inbox, deduplicação e isolamento', () => {
   assert.match(workerSource, /WITH \(UPDLOCK, HOLDLOCK\)/);
   assert.match(workerSource, /JALECOS_CONFORTO_LINK_CHECK_FAILED/);
   assert.match(workerSource, /JALECOS_CONFORTO_ENQUEUE_FAILED/);
+  assert.match(
+    workerSource,
+    /\.\.\.\(canal === 'email'[\s\S]*?beneficioUrl: config\.beneficioUrl,[\s\S]*?cupom: config\.cupom,[\s\S]*?: \{\}\)/
+  );
   assert.doesNotMatch(workerSource, /beneficioBcmedFisioterapeutaWorker/);
 });
 
