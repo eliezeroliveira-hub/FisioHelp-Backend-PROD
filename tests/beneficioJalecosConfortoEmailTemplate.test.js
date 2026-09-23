@@ -10,7 +10,7 @@ test('monta lançamento Jalecos com links, cupom e sem tokens residuais', () => 
     variacao: 'lancamento',
   });
 
-  assert.equal(email.assunto, '🧡 Novo benefício FisioHelp: 10% OFF na Jalecos Conforto');
+  assert.equal(email.assunto, 'Novo benefício FisioHelp: 10% OFF na Jalecos Conforto');
   assert.match(email.corpoHtml, /Ana &amp; Bia/);
   assert.equal(
     (email.corpoHtml.match(/https:\/\/www\.jalecosconforto\.com\.br\//g) || []).length,

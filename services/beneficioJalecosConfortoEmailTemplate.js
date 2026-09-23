@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-const ASSUNTO_LANCAMENTO = '🧡 Novo benefício FisioHelp: 10% OFF na Jalecos Conforto';
+const ASSUNTO_LANCAMENTO = 'Novo benefício FisioHelp: 10% OFF na Jalecos Conforto';
 const ASSUNTO_LEMBRETE = 'Seu cupom de 10% OFF na Jalecos Conforto';
 const DEFAULT_BENEFICIO_URL = 'https://www.jalecosconforto.com.br/';
 const DEFAULT_CUPOM = 'FisioHelp';

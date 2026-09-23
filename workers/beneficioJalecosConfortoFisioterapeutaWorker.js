@@ -17,7 +17,7 @@ const PUSH_LANCAMENTO =
   'Novo benefício FisioHelp: use o cupom FisioHelp e ganhe 10% em jalecos e scrubs. Confira os detalhes no seu e-mail.';
 const PUSH_LEMBRETE =
   'Use o cupom FisioHelp e aproveite 10% OFF na Jalecos Conforto. Confira como usar no e-mail da FisioHelp.';
-const TITULO_EMAIL_LANCAMENTO = '🧡 Novo benefício FisioHelp: 10% OFF na Jalecos Conforto';
+const TITULO_EMAIL_LANCAMENTO = 'Novo benefício FisioHelp: 10% OFF na Jalecos Conforto';
 const TITULO_EMAIL_LEMBRETE = 'Seu cupom de 10% OFF na Jalecos Conforto';
 
 let running = false;
