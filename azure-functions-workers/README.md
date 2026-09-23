@@ -14,6 +14,7 @@ Este pacote e separado do Function App de SQL jobs em `azure-functions/`.
 - `enfileirarLembretePerfilFisioterapeuta`: chama `workers/perfilFisioterapeutaLembreteWorker.tick()` a cada 15 minutos.
 - `enfileirarProgramaIndicacaoFisioterapeuta`: chama workers/programaIndicacaoFisioterapeutaWorker.tick() no primeiro dia de cada mês, às 12:00 UTC (09:00 em São Paulo).
 - `enfileirarBeneficioBcmedFisioterapeuta`: chama `workers/beneficioBcmedFisioterapeutaWorker.tick()` diariamente, às 12:00 UTC (09:00 em São Paulo), sem execução no startup.
+- `enfileirarBeneficioJalecosConfortoFisioterapeuta`: chama `workers/beneficioJalecosConfortoFisioterapeutaWorker.tick()` diariamente, às 12:10 UTC (09:10 em São Paulo), sem execução no startup.
 
 ## Deploy
 
@@ -53,8 +54,13 @@ interrompida. Configuracoes:
 - `ACS_EMAIL_TOTAL_TIMEOUT_MS=90000`
 - `NOTIF_WORKER_BATCH_SIZE=5`
 - `NOTIF_WORKER_MAX_TICK_MS=480000`
+- `NOTIF_PROMO_EMAIL_MAX_60_MIN=60`
 
 Itens reivindicados e ainda nao iniciados voltam a `Pendente` ao atingir o limite do tick.
+O claim da fila usa um lock distribuido no SQL. Ele considera todos os e-mails enviados
+ou em processamento nos ultimos 60 minutos, permite no maximo um e-mail promocional por
+minuto e reserva no maximo uma posicao promocional por lote, preservando prioridade para
+as notificacoes transacionais restantes.
 
 O fluxo `enfileirarOrientacaoCheckinFisio` é independente do lembrete de consulta de
 24 horas. Ele valida `CHECKIN_ORIENTACAO_WORKER_ENABLED` dentro do próprio `tick()` e
@@ -125,6 +131,40 @@ O push não carrega URL e só é criado depois que já existe um e-mail enviado 
 campanha. Somente o push do ciclo inicial é gravado na caixa interna de notificações.
 Desabilitar o worker ou um canal impede que itens BCMED pendentes sejam reivindicados;
 isso não afeta as demais notificações.
+
+O fluxo `enfileirarBeneficioJalecosConfortoFisioterapeuta` replica as garantias de
+elegibilidade, idempotencia e expiracao da campanha BCMED, mas usa tipo, configuracao,
+template e chave de lock proprios. O push nao possui URL, so e criado depois de um e-mail
+enviado na mesma campanha e apenas o ciclo inicial e gravado na caixa interna.
+Configuracoes:
+
+- `JALECOS_CONFORTO_WORKER_ENABLED=false`
+- `JALECOS_CONFORTO_EMAIL_ENABLED=true`
+- `JALECOS_CONFORTO_PUSH_ENABLED=true`
+- `JALECOS_CONFORTO_CAMPANHA_ID=`
+- `JALECOS_CONFORTO_DATA_INICIAL=` e `JALECOS_CONFORTO_DATA_FINAL=` (YYYY-MM-DD)
+- `JALECOS_CONFORTO_EMAIL_INTERVAL_DAYS=20`
+- `JALECOS_CONFORTO_PUSH_INTERVAL_DAYS=10`
+- `JALECOS_CONFORTO_TOLERANCIA_DIAS=3`
+- `JALECOS_CONFORTO_BATCH_SIZE=50` e `JALECOS_CONFORTO_MAX_BATCHES=20`
+- `JALECOS_CONFORTO_FISIOTERAPEUTA_ID=` (piloto controlado)
+- `JALECOS_CONFORTO_FISIOTERAPEUTA_EMAIL=` (alternativa ao ID para piloto controlado)
+- `JALECOS_CONFORTO_FISIOTERAPEUTA_IDS_EXCLUIDOS=[]`
+- `JALECOS_CONFORTO_URL=https://www.jalecosconforto.com.br/`
+- `JALECOS_CONFORTO_CUPOM=FisioHelp`
+- `JALECOS_CONFORTO_LINK_CHECK_TIMEOUT_MS=5000`
+
+O worker fica desativado por padrao. Datas e identificador devem ser definidos apenas
+para cada piloto e, depois, novamente para a campanha oficial. A data inicial faz parte
+da chave de deduplicacao, evitando colisao entre piloto, campanha oficial e renovacao.
+
+Para cancelar itens Jalecos Conforto pendentes, desligue as flags, aguarde mais que o
+prazo de recuperacao de itens travados e execute duas rodadas, sempre iniciando por dry-run:
+
+```bash
+node scripts/notificacoes/cancelarBeneficioJalecosConfortoPendentes.mjs --campaign-id beneficio-jalecos-conforto-2026 --expected-database mvpdb-hml --dry-run
+node scripts/notificacoes/cancelarBeneficioJalecosConfortoPendentes.mjs --campaign-id beneficio-jalecos-conforto-2026 --expected-database mvpdb-hml --execute --confirm-campaign-id beneficio-jalecos-conforto-2026
+```
 
 Para cancelar itens pendentes, primeiro desligue as flags, espere mais que o prazo de
 recuperação de itens travados (10 minutos) e execute duas rodadas do script, sempre

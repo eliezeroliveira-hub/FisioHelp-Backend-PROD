@@ -5,6 +5,7 @@ import { isProviderReal as isPushProviderReal } from '../providers/pushProvider.
 import { isWhatsAppProviderReal } from '../providers/whatsappProvider.js';
 import notificacoesService from '../services/notificacoesService.js';
 import { obterControleDespachoBeneficioBcmed } from '../utils/beneficioBcmedCampaign.js';
+import { obterControleDespachoBeneficioJalecosConforto } from '../utils/beneficioJalecosConfortoCampaign.js';
 
 function boolEnv(value, fallback = true) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -28,6 +29,7 @@ const config = {
   staleMinutes: intEnv(process.env.NOTIF_WORKER_STALE_MINUTES, 10, { min: 1, max: 240 }),
   batchSize: intEnv(process.env.NOTIF_WORKER_BATCH_SIZE, 5, { min: 1, max: 50 }),
   maxTickMs: intEnv(process.env.NOTIF_WORKER_MAX_TICK_MS, 480_000, { min: 60_000, max: 540_000 }),
+  promocaoEmailMax60Min: intEnv(process.env.NOTIF_PROMO_EMAIL_MAX_60_MIN, 60, { min: 1, max: 90 }),
 };
 
 let timer = null;
@@ -35,6 +37,7 @@ let running = false;
 let missingStructureWarned = false;
 let noActiveChannelsWarned = false;
 let bcmedConfigWarning = null;
+let jalecosConfortoConfigWarning = null;
 
 function usuarioSistema() {
   return { tipo: 'Admin', id: Number(ENV.SYSTEM_ADMIN_ID ?? 1) };
@@ -97,11 +100,29 @@ export async function tick() {
       bcmedConfigWarning = null;
     }
 
+    const controleJalecosConforto = obterControleDespachoBeneficioJalecosConforto(
+      process.env,
+      new Date()
+    );
+    if (
+      controleJalecosConforto.configError &&
+      jalecosConfortoConfigWarning !== controleJalecosConforto.configError
+    ) {
+      jalecosConfortoConfigWarning = controleJalecosConforto.configError;
+      log('error', 'JALECOS_CONFORTO_CONFIG_INVALID no processador; itens da campanha permanecerão pendentes.', {
+        erro: controleJalecosConforto.configError,
+      });
+    } else if (!controleJalecosConforto.configError) {
+      jalecosConfortoConfigWarning = null;
+    }
+
     const lote = await notificacoesService.reivindicarLote(
       {
         batchSize: config.batchSize,
         canaisAtivos: canais,
         controleBcmed,
+        controleJalecosConforto,
+        promocaoEmailMax60Min: config.promocaoEmailMax60Min,
       },
       usuario
     );
@@ -194,6 +215,7 @@ export function startNotificacoesWorker() {
     staleMinutes: config.staleMinutes,
     batchSize: config.batchSize,
     maxTickMs: config.maxTickMs,
+    promocaoEmailMax60Min: config.promocaoEmailMax60Min,
     pushProviderReal: isPushProviderReal,
     emailProviderReal: isEmailProviderReal,
     whatsappProviderReal: isWhatsAppProviderReal,

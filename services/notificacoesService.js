@@ -5,6 +5,7 @@ import { enviarEmail } from '../providers/emailProvider.js';
 import { enviarPush } from '../providers/pushProvider.js';
 import { enviarWhatsApp } from '../providers/whatsappProvider.js';
 import { criarOperationIdFilaNotificacao } from '../utils/acsEmailReliability.js';
+import { getAppTimeZoneParts } from '../utils/appDateTime.js';
 import { HttpError } from '../utils/httpError.js';
 import { isValidEmail, normalizeEmail } from '../utils/identityValidators.js';
 import { queryWithContext } from './_queryWithContext.js';
@@ -405,6 +406,8 @@ async function reivindicarLote(
     batchSize = 10,
     canaisAtivos = ['push'],
     controleBcmed = null,
+    controleJalecosConforto = null,
+    promocaoEmailMax60Min = 60,
   } = {},
   usuario = null
 ) {
@@ -415,12 +418,29 @@ async function reivindicarLote(
   if (canais.length === 0) return [];
 
   const placeholders = canais.map((_, i) => `@Canal${i}`).join(', ');
-  const hojeBrasil = String(controleBcmed?.hojeBrasil || '').trim();
+  const hojeConfigurado = String(
+    controleBcmed?.hojeBrasil || controleJalecosConforto?.hojeBrasil || ''
+  ).trim();
+  const partesHojeBrasil = getAppTimeZoneParts(new Date(), 'America/Sao_Paulo');
+  const hojeFallback = [
+    String(partesHojeBrasil.year).padStart(4, '0'),
+    String(partesHojeBrasil.month).padStart(2, '0'),
+    String(partesHojeBrasil.day).padStart(2, '0'),
+  ].join('-');
+  const hojeBrasil = /^\d{4}-\d{2}-\d{2}$/.test(hojeConfigurado)
+    ? hojeConfigurado
+    : hojeFallback;
   const hojeBrasilDate = /^\d{4}-\d{2}-\d{2}$/.test(hojeBrasil)
     ? new Date(`${hojeBrasil}T00:00:00.000Z`)
     : new Date();
   const bcmedEmailEnabled = controleBcmed?.emailEnabled === true;
   const bcmedPushEnabled = controleBcmed?.pushEnabled === true;
+  const jalecosConfortoEmailEnabled = controleJalecosConforto?.emailEnabled === true;
+  const jalecosConfortoPushEnabled = controleJalecosConforto?.pushEnabled === true;
+  const maxEmails60Min = Math.max(
+    1,
+    Math.min(Number(promocaoEmailMax60Min) || 60, 90)
+  );
 
   const result = await queryWithContext(ctx, (req) => {
     req.input('BatchSize', sql.Int, size);
@@ -428,69 +448,178 @@ async function reivindicarLote(
     req.input('BcmedDadosTipo', sql.NVarChar(100), 'campanha_beneficio_bcmed');
     req.input('BcmedEmailEnabled', sql.Bit, bcmedEmailEnabled);
     req.input('BcmedPushEnabled', sql.Bit, bcmedPushEnabled);
+    req.input(
+      'JalecosConfortoDadosTipo',
+      sql.NVarChar(100),
+      'campanha_beneficio_jalecos_conforto'
+    );
+    req.input('JalecosConfortoEmailEnabled', sql.Bit, jalecosConfortoEmailEnabled);
+    req.input('JalecosConfortoPushEnabled', sql.Bit, jalecosConfortoPushEnabled);
+    req.input('PromocaoEmailMax60Min', sql.Int, maxEmails60Min);
     canais.forEach((canal, i) => {
       req.input(`Canal${i}`, sql.NVarChar(10), canal);
     });
   }, `
-    ;WITH lote AS (
-      SELECT TOP (@BatchSize) [Id]
-      FROM [dbo].[FilaNotificacoes] WITH (UPDLOCK, READPAST, ROWLOCK, READCOMMITTEDLOCK)
-      WHERE [Canal] IN (${placeholders})
-        AND [Status] IN (N'Pendente', N'FalhaTemporaria')
-        AND [Tentativas] < [MaxTentativas]
-        AND ([ProximaTentativaEm] IS NULL OR [ProximaTentativaEm] <= SYSDATETIME())
-        AND (
-          COALESCE(
-            CASE
-              WHEN ISJSON([DadosJson]) = 1 THEN JSON_VALUE([DadosJson], '$.tipo')
-            END,
-            N''
-          ) <> @BcmedDadosTipo
-          OR (
-            CASE
-              WHEN ISJSON([DadosJson]) = 1 THEN JSON_VALUE([DadosJson], '$.tipo')
-            END = @BcmedDadosTipo
-            AND (
-              ([Canal] = N'email' AND @BcmedEmailEnabled = 1)
-              OR ([Canal] = N'push' AND @BcmedPushEnabled = 1)
+    SET XACT_ABORT ON;
+
+    BEGIN TRY
+      BEGIN TRANSACTION;
+
+      DECLARE @LockResult int;
+      EXEC @LockResult = sys.sp_getapplock
+        @Resource = N'notificacoes:claim:v2',
+        @LockMode = N'Exclusive',
+        @LockOwner = N'Transaction',
+        @LockTimeout = 10000;
+
+      IF @LockResult < 0
+        THROW 51000, 'Não foi possível obter o lock de reivindicação da fila.', 1;
+
+      DECLARE @EmailsUltimos60Min int = (
+        SELECT COUNT_BIG(1)
+        FROM [dbo].[FilaNotificacoes]
+        WHERE [Canal] = N'email'
+          AND (
+            ([Status] = N'Enviado' AND [EnviadoEm] >= DATEADD(MINUTE, -60, SYSDATETIME()))
+            OR (
+              [Status] = N'Processando'
+              AND [ProcessandoEm] >= DATEADD(MINUTE, -60, SYSDATETIME())
             )
-            AND TRY_CONVERT(
-              date,
-              CASE
-                WHEN ISJSON([DadosJson]) = 1 THEN JSON_VALUE([DadosJson], '$.expiraEm')
-              END,
-              23
-            ) IS NOT NULL
-            AND TRY_CONVERT(
-              date,
-              CASE
-                WHEN ISJSON([DadosJson]) = 1 THEN JSON_VALUE([DadosJson], '$.expiraEm')
-              END,
-              23
-            ) >= @HojeBrasil
           )
-        )
-      ORDER BY [ProximaTentativaEm] ASC, [CriadoEm] ASC
-    )
-    UPDATE f
-    SET
-      f.[Status] = N'Processando',
-      f.[ProcessandoEm] = SYSDATETIME(),
-      f.[AtualizadoEm] = SYSDATETIME()
-    OUTPUT
-      inserted.[Id],
-      inserted.[UsuarioTipo],
-      inserted.[UsuarioId],
-      inserted.[Canal],
-      inserted.[Titulo],
-      inserted.[Mensagem],
-      inserted.[DadosJson],
-      inserted.[Tipo],
-      inserted.[ReferenciaId],
-      inserted.[Tentativas],
-      inserted.[MaxTentativas]
-    FROM [dbo].[FilaNotificacoes] f
-    INNER JOIN lote ON lote.[Id] = f.[Id];
+      );
+      DECLARE @PromocoesEmailUltimos60Seg int = (
+        SELECT COUNT_BIG(1)
+        FROM [dbo].[FilaNotificacoes]
+        WHERE [Canal] = N'email'
+          AND [Tipo] = N'Promocao'
+          AND (
+            ([Status] = N'Enviado' AND [EnviadoEm] >= DATEADD(SECOND, -60, SYSDATETIME()))
+            OR (
+              [Status] = N'Processando'
+              AND [ProcessandoEm] >= DATEADD(SECOND, -60, SYSDATETIME())
+            )
+          )
+      );
+      DECLARE @PermitirEmailPromocional bit = CASE
+        WHEN @BatchSize > 1
+          AND @EmailsUltimos60Min < @PromocaoEmailMax60Min
+          AND @PromocoesEmailUltimos60Seg = 0
+        THEN 1 ELSE 0 END;
+
+      ;WITH elegiveis AS (
+        SELECT
+          [Id],
+          [Canal],
+          [Tipo],
+          [ProximaTentativaEm],
+          [CriadoEm],
+          CASE
+            WHEN [Canal] = N'email' AND [Tipo] = N'Promocao' THEN 1
+            ELSE 0
+          END AS [EmailPromocional]
+        FROM [dbo].[FilaNotificacoes] WITH (UPDLOCK, READPAST, ROWLOCK, READCOMMITTEDLOCK)
+        WHERE [Canal] IN (${placeholders})
+          AND [Status] IN (N'Pendente', N'FalhaTemporaria')
+          AND [Tentativas] < [MaxTentativas]
+          AND ([ProximaTentativaEm] IS NULL OR [ProximaTentativaEm] <= SYSDATETIME())
+          AND (
+            NOT ([Canal] = N'email' AND COALESCE([Tipo], N'') = N'Promocao')
+            OR @PermitirEmailPromocional = 1
+          )
+          AND (
+            COALESCE(
+              CASE WHEN ISJSON([DadosJson]) = 1
+                THEN JSON_VALUE([DadosJson], '$.tipo') END,
+              N''
+            ) NOT IN (@BcmedDadosTipo, @JalecosConfortoDadosTipo)
+            OR (
+              CASE WHEN ISJSON([DadosJson]) = 1
+                THEN JSON_VALUE([DadosJson], '$.tipo') END = @BcmedDadosTipo
+              AND (
+                ([Canal] = N'email' AND @BcmedEmailEnabled = 1)
+                OR ([Canal] = N'push' AND @BcmedPushEnabled = 1)
+              )
+              AND TRY_CONVERT(
+                date,
+                CASE WHEN ISJSON([DadosJson]) = 1
+                  THEN JSON_VALUE([DadosJson], '$.expiraEm') END,
+                23
+              ) IS NOT NULL
+              AND TRY_CONVERT(
+                date,
+                CASE WHEN ISJSON([DadosJson]) = 1
+                  THEN JSON_VALUE([DadosJson], '$.expiraEm') END,
+                23
+              ) >= @HojeBrasil
+            )
+            OR (
+              CASE WHEN ISJSON([DadosJson]) = 1
+                THEN JSON_VALUE([DadosJson], '$.tipo') END = @JalecosConfortoDadosTipo
+              AND (
+                ([Canal] = N'email' AND @JalecosConfortoEmailEnabled = 1)
+                OR ([Canal] = N'push' AND @JalecosConfortoPushEnabled = 1)
+              )
+              AND TRY_CONVERT(
+                date,
+                CASE WHEN ISJSON([DadosJson]) = 1
+                  THEN JSON_VALUE([DadosJson], '$.expiraEm') END,
+                23
+              ) IS NOT NULL
+              AND TRY_CONVERT(
+                date,
+                CASE WHEN ISJSON([DadosJson]) = 1
+                  THEN JSON_VALUE([DadosJson], '$.expiraEm') END,
+                23
+              ) >= @HojeBrasil
+            )
+          )
+      ), rankeados AS (
+        SELECT
+          *,
+          CASE WHEN [EmailPromocional] = 1 THEN ROW_NUMBER() OVER (
+            PARTITION BY [EmailPromocional]
+            ORDER BY [ProximaTentativaEm] ASC, [CriadoEm] ASC
+          ) END AS [OrdemEmailPromocional]
+        FROM elegiveis
+      ), lote AS (
+        SELECT TOP (@BatchSize) [Id]
+        FROM rankeados
+        WHERE [EmailPromocional] = 0 OR [OrdemEmailPromocional] = 1
+        ORDER BY
+          CASE
+            WHEN [EmailPromocional] = 1 THEN 0
+            WHEN COALESCE([Tipo], N'') <> N'Promocao' THEN 1
+            ELSE 2
+          END,
+          [ProximaTentativaEm] ASC,
+          [CriadoEm] ASC
+      )
+      UPDATE f
+      SET
+        f.[Status] = N'Processando',
+        f.[ProcessandoEm] = SYSDATETIME(),
+        f.[AtualizadoEm] = SYSDATETIME()
+      OUTPUT
+        inserted.[Id],
+        inserted.[UsuarioTipo],
+        inserted.[UsuarioId],
+        inserted.[Canal],
+        inserted.[Titulo],
+        inserted.[Mensagem],
+        inserted.[DadosJson],
+        inserted.[Tipo],
+        inserted.[ReferenciaId],
+        inserted.[Tentativas],
+        inserted.[MaxTentativas]
+      FROM [dbo].[FilaNotificacoes] f
+      INNER JOIN lote ON lote.[Id] = f.[Id];
+
+      COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+      IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+      THROW;
+    END CATCH;
   `, { requireContext: true });
 
   return result.recordset || [];

@@ -37,10 +37,13 @@ const reliabilitySource = readFileSync(
 );
 
 test('claim filtra BCMED antes do TOP com JSON seguro, pausa e expiração', () => {
-  const topIndex = serviceSource.indexOf('SELECT TOP (@BatchSize)');
-  const orderIndex = serviceSource.indexOf('ORDER BY [ProximaTentativaEm]', topIndex);
-  const claimBlock = serviceSource.slice(topIndex, orderIndex);
+  const claimStart = serviceSource.indexOf('async function reivindicarLote(');
+  const claimEnd = serviceSource.indexOf('async function listarDispositivosAtivos(', claimStart);
+  const claimBlock = serviceSource.slice(claimStart, claimEnd);
+  const filterIndex = claimBlock.indexOf('@BcmedDadosTipo');
+  const topIndex = claimBlock.indexOf('SELECT TOP (@BatchSize)');
 
+  assert.ok(filterIndex >= 0 && filterIndex < topIndex);
   assert.match(claimBlock, /ISJSON\(\[DadosJson\]\) = 1/);
   assert.match(claimBlock, /@BcmedEmailEnabled/);
   assert.match(claimBlock, /@BcmedPushEnabled/);

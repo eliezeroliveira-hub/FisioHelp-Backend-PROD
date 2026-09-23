@@ -1,6 +1,7 @@
 import { montarEmailLembretePerfilFisioterapeuta } from './perfilFisioterapeutaEmailTemplate.js';
 import { montarEmailProgramaIndicacaoFisioterapeuta } from './programaIndicacaoEmailTemplate.js';
 import { montarEmailBeneficioBcmedFisioterapeuta } from './beneficioBcmedEmailTemplate.js';
+import { montarEmailBeneficioJalecosConfortoFisioterapeuta } from './beneficioJalecosConfortoEmailTemplate.js';
 import { montarDocumentoProfissionalApresentacao } from '../utils/professionalDocumentPresentation.js';
 
 const FOOTER = 'Mensagem automática — esta caixa não é monitorada. Fale com suporte@fisiohelp.com.br.';
@@ -605,6 +606,15 @@ export function montarEmailNotificacao({ titulo, mensagem, dados = null } = {}) 
     return montarEmailBeneficioBcmedFisioterapeuta({
       nomeFisioterapeuta: dados?.fisioterapeutaNome,
       variacao: dados?.variacao,
+    });
+  }
+
+  if (dados?.emailModelo === 'beneficio_jalecos_conforto_fisioterapeuta') {
+    return montarEmailBeneficioJalecosConfortoFisioterapeuta({
+      nomeFisioterapeuta: dados?.fisioterapeutaNome,
+      variacao: dados?.variacao,
+      beneficioUrl: dados?.beneficioUrl,
+      cupom: dados?.cupom,
     });
   }
 
