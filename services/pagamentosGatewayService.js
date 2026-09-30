@@ -89,14 +89,30 @@ function extractAddressNumber(address) {
   return firstNumber?.[1] ?? null;
 }
 
-function buildAsaasCustomerData(row) {
+function isValidAsaasCustomerName(value) {
+  const name = nullableText(value);
+  if (!name || name.length < 5 || name.length > 100) return false;
+  const parts = name.split(/\s+/).filter(Boolean);
+  return parts.length >= 2 && parts.every((part) => /^[\p{L}'’-]+$/u.test(part));
+}
+
+function buildAsaasCustomerData(row, { webCheckout = false } = {}) {
   const sandbox = isAsaasSandbox();
   const cpf = onlyDigits(row.PacienteCpfCnpj);
   const phone = onlyDigits(row.PacienteTelefone);
   const postalCode = onlyDigits(row.PacienteCep);
+  let customerName = nullableText(row.PacienteNome);
+
+  if (webCheckout && !isValidAsaasCustomerName(customerName)) {
+    if (sandbox) {
+      customerName = 'Paciente Teste FisioHelp';
+    } else {
+      throw new HttpError(400, 'Informe seu nome completo em Minha conta > Meu perfil antes de continuar.');
+    }
+  }
 
   const customerData = {
-    name: nullableText(row.PacienteNome) || (sandbox ? 'Joao da Silva' : null),
+    name: customerName || (sandbox ? 'Joao da Silva' : null),
     cpfCnpj: isValidCPF(cpf) ? cpf : (sandbox ? '24971563792' : null),
     email: isValidEmail(row.PacienteEmail) ? nullableText(row.PacienteEmail) : (sandbox ? 'joao.teste@fisiohelp.com.br' : null),
     phone: phone.length >= 10 ? phone : (sandbox ? '11999999999' : null),
@@ -692,7 +708,9 @@ const pagamentosGatewayService = {
         throw new HttpError(400, 'Valor da consulta inválido.');
       }
 
-      const customerData = buildAsaasCustomerData(row);
+      const customerData = buildAsaasCustomerData(row, {
+        webCheckout: reutilizarCheckoutAtivo === true,
+      });
 
       const checkoutPayload = {
       billingTypes: [tipoCobranca],

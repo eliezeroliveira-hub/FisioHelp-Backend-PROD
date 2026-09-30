@@ -67,6 +67,15 @@ test('retomada web serializa a decisão e só ela ativa reutilização', () => {
   assert.match(gateway, /reutilizarCheckoutAtivo === true \? \{ timeoutMs: ASAAS_WEB_CHECKOUT_TIMEOUT_MS \} : undefined/);
 });
 
+test('checkout web trata nome curto no sandbox sem mudar o checkout do app', () => {
+  const gateway = source('services/pagamentosGatewayService.js');
+  assert.match(gateway, /function isValidAsaasCustomerName/);
+  assert.match(gateway, /function buildAsaasCustomerData\(row, \{ webCheckout = false \} = \{\}\)/);
+  assert.match(gateway, /webCheckout && !isValidAsaasCustomerName\(customerName\)/);
+  assert.match(gateway, /customerName = 'Paciente Teste FisioHelp'/);
+  assert.match(gateway, /webCheckout: reutilizarCheckoutAtivo === true/);
+});
+
 test('timeout do ACS protege também e-mails síncronos e OTP sem alterar o dispatcher do app', () => {
   const contato = source('providers/contatoProvider.js');
   const gateway = source('services/pagamentosGatewayService.js');
