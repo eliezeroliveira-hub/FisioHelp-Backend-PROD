@@ -69,6 +69,31 @@ function parseHttpUrlEnv(name, fallback) {
   return parsed.toString();
 }
 
+function parseHttpsOriginsEnv(name) {
+  const raw = optionalEnv(name);
+  if (!raw) return [];
+  const origins = [];
+  for (const entry of raw.split(',').map((value) => value.trim()).filter(Boolean)) {
+    const canonical = entry.replace(/\/+$/, '');
+    let parsed;
+    try {
+      parsed = new URL(canonical);
+    } catch {
+      throw new Error(`${name} contém origem inválida.`);
+    }
+    if (
+      parsed.protocol !== 'https:'
+      || parsed.origin !== canonical
+      || parsed.username
+      || parsed.password
+    ) {
+      throw new Error(`${name} aceita somente origens HTTPS, sem caminho, query ou credenciais.`);
+    }
+    origins.push(parsed.origin);
+  }
+  return [...new Set(origins)];
+}
+
 const tokenExpirationRaw = process.env.TOKEN_EXPIRATION || '1d';
 if (!/^\d+[smhd]$/.test(tokenExpirationRaw)) {
   throw new Error('TOKEN_EXPIRATION inválido. Use formato como 15m, 1h, 7d.');
@@ -104,6 +129,7 @@ const asaasCheckoutBaseUrl = process.env.ASAAS_CHECKOUT_BASE_URL || 'https://san
 const asaasSuccessUrl = process.env.ASAAS_SUCCESS_URL || 'https://fisiohelp.com.br/pagamento/sucesso';
 const asaasCancelUrl = process.env.ASAAS_CANCEL_URL || 'https://fisiohelp.com.br/pagamento/cancelado';
 const asaasExpiredUrl = process.env.ASAAS_EXPIRED_URL || 'https://fisiohelp.com.br/pagamento/expirado';
+const webCheckoutAllowedOrigins = parseHttpsOriginsEnv('WEB_CHECKOUT_ALLOWED_ORIGINS');
 const asaasWebhookToken = requiredInProduction('ASAAS_WEBHOOK_TOKEN');
 const asaasWithdrawalWebhookToken = optionalEnv('ASAAS_WITHDRAWAL_WEBHOOK_TOKEN') ?? asaasWebhookToken;
 
@@ -285,6 +311,7 @@ export const ENV = {
   ASAAS_SUCCESS_URL: asaasSuccessUrl,
   ASAAS_CANCEL_URL: asaasCancelUrl,
   ASAAS_EXPIRED_URL: asaasExpiredUrl,
+  WEB_CHECKOUT_ALLOWED_ORIGINS: webCheckoutAllowedOrigins,
   ASAAS_WEBHOOK_TOKEN: asaasWebhookToken,
   ASAAS_WITHDRAWAL_WEBHOOK_TOKEN: asaasWithdrawalWebhookToken,
 

@@ -15,6 +15,9 @@ function stripPortFromIp(value) {
 }
 
 export function getClientIp(req) {
+  const bffIp = stripPortFromIp(req?.trustedBffClientIp);
+  if (bffIp && isIP(bffIp)) return bffIp;
+
   const trustedIp = stripPortFromIp(req?.ip);
   if (trustedIp) return trustedIp;
 

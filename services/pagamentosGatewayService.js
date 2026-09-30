@@ -1,6 +1,6 @@
 //services/pagamentosGatewayService.js
 
-import { sql } from '../config/dbConfig.js';
+import getPool, { sql } from '../config/dbConfig.js';
 import { queryWithContext } from './_queryWithContext.js';
 import { HttpError } from '../utils/httpError.js';
 import { ENV } from '../config/env.js';
@@ -11,6 +11,7 @@ import { agoraBrasilDate, formatBrasilDateTimeLocalIso } from '../utils/appDateT
 import { validarJurisdicaoAtendimentoAtual } from '../utils/jurisdiction.js';
 
 const ASAAS_PACOTE_MAX_PARCELAS = 10;
+const ASAAS_WEB_CHECKOUT_TIMEOUT_MS = 30_000;
 
 function safeUsuario(usuario) {
   if (!usuario) return null;
@@ -40,6 +41,41 @@ function nullableText(value) {
 
 function isAsaasSandbox() {
   return /sandbox|hmlg|homolog/i.test(String(ENV.ASAAS_BASE_URL ?? ''));
+}
+
+function resolveCheckoutCallback({ reutilizarCheckoutAtivo, webOrigin }) {
+  if (reutilizarCheckoutAtivo !== true) {
+    return {
+      successUrl: ENV.ASAAS_SUCCESS_URL,
+      cancelUrl: ENV.ASAAS_CANCEL_URL,
+      expiredUrl: ENV.ASAAS_EXPIRED_URL,
+    };
+  }
+
+  if (!Array.isArray(ENV.WEB_CHECKOUT_ALLOWED_ORIGINS) || ENV.WEB_CHECKOUT_ALLOWED_ORIGINS.length === 0) {
+    throw new HttpError(503, 'Checkout pelo site temporariamente indisponível.');
+  }
+
+  let origin;
+  try {
+    const candidate = String(webOrigin || '').trim();
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== 'https:' || parsed.origin !== candidate || parsed.username || parsed.password) {
+      throw new Error('Origem não canônica');
+    }
+    origin = parsed.origin;
+  } catch {
+    throw new HttpError(403, 'Origem do checkout web não permitida.');
+  }
+  if (!ENV.WEB_CHECKOUT_ALLOWED_ORIGINS.includes(origin)) {
+    throw new HttpError(403, 'Origem do checkout web não permitida.');
+  }
+
+  return {
+    successUrl: origin + '/pagamento/sucesso',
+    cancelUrl: origin + '/pagamento/cancelado',
+    expiredUrl: origin + '/pagamento/expirado',
+  };
 }
 
 function extractAddressNumber(address) {
@@ -185,6 +221,39 @@ function gatewayDecimal(value) {
   if (value == null || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+async function withCheckoutApplicationLock(transacaoId, callback) {
+  const pool = await getPool();
+  const transaction = new sql.Transaction(pool);
+  await transaction.begin(sql.ISOLATION_LEVEL.READ_COMMITTED);
+
+  try {
+    const lockRequest = new sql.Request(transaction);
+    lockRequest.input('LockResource', sql.NVarChar(255), `CheckoutAsaasConsulta:${transacaoId}`);
+    const lockResult = await lockRequest.query(`
+      DECLARE @LockResult INT;
+      EXEC @LockResult = sys.sp_getapplock
+        @Resource = @LockResource,
+        @LockMode = 'Exclusive',
+        @LockOwner = 'Transaction',
+        @LockTimeout = 15000;
+      SELECT @LockResult AS LockResult;
+    `);
+
+    if (Number(lockResult.recordset?.[0]?.LockResult ?? -999) < 0) {
+      throw new HttpError(409, 'O checkout já está sendo preparado. Tente novamente em alguns segundos.');
+    }
+
+    const result = await callback();
+    await transaction.commit();
+    return result;
+  } catch (error) {
+    try {
+      await transaction.rollback();
+    } catch {}
+    throw error;
+  }
 }
 
 async function obterNetValuePagamentoAsaas(paymentId) {
@@ -490,7 +559,7 @@ const pagamentosGatewayService = {
     return this.confirmarTransacaoPaga(id, usuarioSistema);
   },
 
-  async criarCheckoutAsaas({ consultaId, billingType }, usuario) {
+  async criarCheckoutAsaas({ consultaId, billingType, reutilizarCheckoutAtivo = false, webOrigin = null }, usuario) {
     const ctx = safeUsuario(usuario);
     if (!ctx?.id || !ctx?.tipo) {
       throw new HttpError(401, 'Não autenticado.');
@@ -508,6 +577,7 @@ const pagamentosGatewayService = {
     if (!tipoCobranca) {
       throw new HttpError(400, 'Forma de pagamento inválida.');
     }
+    const checkoutCallback = resolveCheckoutCallback({ reutilizarCheckoutAtivo, webOrigin });
 
     const transacaoResult = await queryWithContext(ctx, (req) => {
       req.input('ConsultaId', sql.Int, idConsulta);
@@ -529,7 +599,67 @@ const pagamentosGatewayService = {
       throw new HttpError(409, 'Esta consulta já está paga.');
     }
 
-    const dados = await queryWithContext(ctx, (req) => {
+    const criarOuReutilizar = async () => {
+      if (reutilizarCheckoutAtivo === true) {
+        const existente = await queryWithContext(ctx, (req) => {
+          req.input('Id', sql.Int, transacaoId);
+          req.input('PacienteId', sql.Int, Number(ctx.id));
+          req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
+        }, `
+          SELECT TOP (1)
+            t.Status,
+            t.GatewayCheckoutId,
+            t.CodigoTransacao,
+            t.GatewayPaymentStatus,
+            COALESCE(checkoutLog.CheckoutCriadoEm, t.DataCriacao) AS CheckoutCriadoEm,
+            CAST(CASE
+              WHEN COALESCE(checkoutLog.CheckoutCriadoEm, t.DataCriacao) IS NOT NULL
+               AND COALESCE(checkoutLog.CheckoutCriadoEm, t.DataCriacao) >= DATEADD(MINUTE, -50, @AgoraBrasil)
+               AND COALESCE(checkoutLog.CheckoutCriadoEm, t.DataCriacao) <= @AgoraBrasil
+                THEN 1 ELSE 0
+            END AS bit) AS CheckoutDentroDaValidade
+          FROM dbo.Transacoes t
+          OUTER APPLY (
+            SELECT TOP (1)
+              lf.DataAcao AS CheckoutCriadoEm
+            FROM dbo.LogsFinanceiros lf WITH (READCOMMITTEDLOCK)
+            WHERE lf.TransacaoId = t.Id
+              AND LTRIM(RTRIM(ISNULL(lf.Acao, N''))) = N'Criação'
+              AND lf.Observacao = CONCAT(
+                N'Checkout Asaas criado: ',
+                COALESCE(t.GatewayCheckoutId, t.CodigoTransacao)
+              )
+            ORDER BY lf.DataAcao DESC
+          ) checkoutLog
+          WHERE t.Id = @Id
+            AND t.PacienteId = @PacienteId;
+        `);
+        const checkoutExistente = existente.recordset?.[0] ?? null;
+        if (normText(checkoutExistente?.Status) === 'Pago') {
+          throw new HttpError(409, 'Esta consulta já está paga.');
+        }
+
+        const checkoutIdExistente = gatewayText(
+          checkoutExistente?.GatewayCheckoutId ?? checkoutExistente?.CodigoTransacao,
+          100
+        );
+        const statusGateway = normText(checkoutExistente?.GatewayPaymentStatus).toUpperCase();
+        const aindaAtivo = checkoutIdExistente
+          && !['CANCELED', 'CANCELLED', 'EXPIRED', 'PAID'].includes(statusGateway)
+          && isTrueBit(checkoutExistente?.CheckoutDentroDaValidade);
+
+        if (aindaAtivo) {
+          return {
+            gateway: 'Asaas',
+            transacaoId,
+            checkoutId: checkoutIdExistente,
+            checkoutUrl: montarCheckoutUrl({ id: checkoutIdExistente }),
+            reutilizado: true,
+          };
+        }
+      }
+
+      const dados = await queryWithContext(ctx, (req) => {
       req.input('Id', sql.Int, transacaoId);
       req.input('PacienteId', sql.Int, Number(ctx.id));
     }, `
@@ -556,68 +686,111 @@ const pagamentosGatewayService = {
         AND t.Status = N'Pendente';
     `);
 
-    const row = dados?.recordset?.[0] ?? null;
-    const valor = Number(row?.ValorTotal ?? 0);
-    if (!row || !valor || valor <= 0) {
-      throw new HttpError(400, 'Valor da consulta inválido.');
-    }
+      const row = dados?.recordset?.[0] ?? null;
+      const valor = Number(row?.ValorTotal ?? 0);
+      if (!row || !valor || valor <= 0) {
+        throw new HttpError(400, 'Valor da consulta inválido.');
+      }
 
-    const customerData = buildAsaasCustomerData(row);
+      const customerData = buildAsaasCustomerData(row);
 
-    const checkoutPayload = {
+      const checkoutPayload = {
       billingTypes: [tipoCobranca],
       chargeTypes: ['DETACHED'],
       minutesToExpire: 60,
       externalReference: String(transacaoId),
-      callback: {
-        successUrl: ENV.ASAAS_SUCCESS_URL,
-        cancelUrl: ENV.ASAAS_CANCEL_URL,
-        expiredUrl: ENV.ASAAS_EXPIRED_URL,
-      },
+      callback: checkoutCallback,
       items: [
         buildAsaasCheckoutItem(row, valor)
       ],
       customerData,
     };
 
-    const checkout = await asaasClient.criarCheckout(checkoutPayload);
+      const checkout = await asaasClient.criarCheckout(
+        checkoutPayload,
+        reutilizarCheckoutAtivo === true ? { timeoutMs: ASAAS_WEB_CHECKOUT_TIMEOUT_MS } : undefined
+      );
 
-    const checkoutId = String(checkout?.id ?? '').trim();
-    if (!checkoutId) {
-      throw new HttpError(502, 'Asaas não retornou checkout.id.');
-    }
-    if (checkoutId.length > 50) {
-      throw new HttpError(500, 'checkout.id excede o tamanho de Transacoes.CodigoTransacao.');
-    }
+      const checkoutId = String(checkout?.id ?? '').trim();
+      if (!checkoutId) {
+        throw new HttpError(502, 'Asaas não retornou checkout.id.');
+      }
+      if (checkoutId.length > 50) {
+        throw new HttpError(500, 'checkout.id excede o tamanho de Transacoes.CodigoTransacao.');
+      }
 
-    await queryWithContext(ctx, (req) => {
+      await queryWithContext(ctx, (req) => {
       req.input('Id', sql.Int, transacaoId);
       req.input('Codigo', sql.NVarChar(50), checkoutId);
       req.input('GatewayCheckoutId', sql.NVarChar(100), checkoutId);
       req.input('GatewayPaymentStatus', sql.NVarChar(60), gatewayText(checkout?.status, 60));
       req.input('AgoraBrasil', sql.DateTime2(7), agoraBrasilDate());
+      req.input('RegistrarCheckoutWeb', sql.Bit, reutilizarCheckoutAtivo === true);
     }, `
-      UPDATE dbo.Transacoes
-      SET CodigoTransacao = @Codigo,
-          GatewayProvider = N'asaas',
-          GatewayCheckoutId = @GatewayCheckoutId,
-          GatewayPaymentStatus = COALESCE(@GatewayPaymentStatus, GatewayPaymentStatus),
-          GatewayAtualizadoEm = @AgoraBrasil
-      WHERE Id = @Id
-        AND Status = N'Pendente';
+      DECLARE @CheckoutWebTransacaoIniciada BIT = 0;
+
+      BEGIN TRY
+        IF @RegistrarCheckoutWeb = 1
+        BEGIN
+          BEGIN TRANSACTION;
+          SET @CheckoutWebTransacaoIniciada = 1;
+        END
+
+        UPDATE dbo.Transacoes
+        SET CodigoTransacao = @Codigo,
+            GatewayProvider = N'asaas',
+            GatewayCheckoutId = @GatewayCheckoutId,
+            GatewayPaymentStatus = COALESCE(@GatewayPaymentStatus, GatewayPaymentStatus),
+            GatewayAtualizadoEm = @AgoraBrasil
+        WHERE Id = @Id
+          AND Status = N'Pendente';
+
+        DECLARE @CheckoutAtualizado BIT = CASE WHEN @@ROWCOUNT > 0 THEN 1 ELSE 0 END;
+
+        IF @RegistrarCheckoutWeb = 1
+          AND @CheckoutAtualizado = 1
+          AND NOT EXISTS (
+            SELECT 1
+            FROM dbo.LogsFinanceiros WITH (UPDLOCK, HOLDLOCK)
+            WHERE TransacaoId = @Id
+              AND LTRIM(RTRIM(ISNULL(Acao, N''))) = N'Criação'
+              AND Observacao = CONCAT(N'Checkout Asaas criado: ', @GatewayCheckoutId)
+          )
+        BEGIN
+          INSERT INTO dbo.LogsFinanceiros
+            (TransacaoId, RepasseId, Usuario, Acao, DataAcao, Observacao)
+          VALUES
+            (@Id, NULL, N'Sistema', N'Criação', @AgoraBrasil,
+             CONCAT(N'Checkout Asaas criado: ', @GatewayCheckoutId));
+        END
+
+        IF @CheckoutWebTransacaoIniciada = 1
+          COMMIT TRANSACTION;
+      END TRY
+      BEGIN CATCH
+        IF @CheckoutWebTransacaoIniciada = 1 AND XACT_STATE() <> 0
+          ROLLBACK TRANSACTION;
+        THROW;
+      END CATCH
     `);
 
-    const checkoutUrl = montarCheckoutUrl(checkout);
-    if (!checkoutUrl) {
-      throw new HttpError(502, 'Asaas não retornou URL de checkout.');
-    }
+      const checkoutUrl = montarCheckoutUrl(checkout);
+      if (!checkoutUrl) {
+        throw new HttpError(502, 'Asaas não retornou URL de checkout.');
+      }
 
-    return {
-      gateway: 'Asaas',
-      transacaoId,
-      checkoutId,
-      checkoutUrl,
+      return {
+        gateway: 'Asaas',
+        transacaoId,
+        checkoutId,
+        checkoutUrl,
+        reutilizado: false,
+      };
     };
+
+    return reutilizarCheckoutAtivo === true
+      ? withCheckoutApplicationLock(transacaoId, criarOuReutilizar)
+      : criarOuReutilizar();
   },
 
   async criarCheckoutPacoteAsaas({ pacoteId, billingType }, usuario) {

@@ -65,10 +65,13 @@ function resolvePacoteExternalReference(value) {
 const pagamentosGatewayController = {
   async criarCheckout(req, res) {
     try {
+      const reutilizarCheckoutAtivo = req.body?.reutilizarCheckoutAtivo === true;
       const resultado = await pagamentosGatewayService.criarCheckoutAsaas(
         {
           consultaId: req.body?.consultaId ?? req.body?.ConsultaId,
           billingType: req.body?.billingType ?? req.body?.BillingType,
+          reutilizarCheckoutAtivo,
+          webOrigin: reutilizarCheckoutAtivo ? req.get('origin') : null,
         },
         req.usuario
       );

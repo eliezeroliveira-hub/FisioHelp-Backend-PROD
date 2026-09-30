@@ -15,7 +15,7 @@ export function montarPrestadorCheckout(dados = {}) {
       Documento: documento.DocumentoNormalizado,
     });
   } catch {
-    throw new HttpError(500, 'Documento do prestador indisponível para o checkout.');
+    throw new HttpError(422, 'Este profissional precisa concluir os dados fiscais antes de receber novos agendamentos. Escolha outro profissional ou tente novamente mais tarde.');
   }
 }
 

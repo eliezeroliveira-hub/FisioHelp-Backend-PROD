@@ -108,6 +108,27 @@ const pacientesController = {
     }
   },
 
+  // Cadastro social usado exclusivamente pelo BFF do site.
+  async criarSocial(req, res) {
+    try {
+      const data = await pacientesService.criarSocial(req.body || {}, req);
+      log('info', 'Paciente criado por cadastro social web', {
+        pacienteId: data?.usuario?.id,
+      });
+      return res.status(201).json({ sucesso: true, ...data });
+    } catch (erro) {
+      log('error', 'Erro ao criar paciente por cadastro social web', { erro: erro.message });
+      const status = erro?.httpStatus || erro?.statusCode || 400;
+      const mensagem = erro?.message || 'Erro ao criar paciente.';
+      return res.status(status).json({
+        sucesso: false,
+        erro: status >= 500 ? 'Erro interno do servidor.' : mensagem,
+        detalhes: status >= 500 ? undefined : mensagem,
+        codigo: status >= 500 ? undefined : (erro?.code || erro?.codigo),
+      });
+    }
+  },
+
   async ativarPreCadastro(req, res) {
     try {
       const data = await pacientesService.ativarPreCadastro(req.body || {}, req);

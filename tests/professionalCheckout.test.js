@@ -45,7 +45,11 @@ test('monta prestador PJ com CNPJ normalizado para o checkout', () => {
 test('não devolve detalhes do dado inconsistente na mensagem de erro', () => {
   assert.throws(
     () => montarPrestadorCheckout({ TipoPessoa: 'PF', CPF: '11111111111' }),
-    /Documento do prestador indisponível para o checkout\./
+    (error) => {
+      assert.equal(error.statusCode, 422);
+      assert.match(error.message, /concluir os dados fiscais/);
+      return true;
+    }
   );
 });
 

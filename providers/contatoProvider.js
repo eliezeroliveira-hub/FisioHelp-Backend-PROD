@@ -4,6 +4,7 @@ import { EmailClient } from '@azure/communication-email';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { ENV } from '../config/env.js';
 import { log } from '../config/logger.js';
+import { aguardarPollerAcs, executarComAbortTimeout } from '../utils/acsEmailReliability.js';
 import whatsappProvider, { isWhatsAppProviderReal } from './whatsappProvider.js';
 import twilioVerifyProvider, { isTwilioVerifyConfigured } from './twilioVerifyProvider.js';
 
@@ -83,30 +84,6 @@ function sanitizeSubject(assunto, fallback) {
   return String(assunto || fallback).replace(/[\r\n]+/g, ' ').trim();
 }
 
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function aguardarAcs(poller, { timeoutMs = 180_000, intervalMs = 10_000 } = {}) {
-  const deadline = Date.now() + timeoutMs;
-
-  while (!poller.isDone()) {
-    if (Date.now() > deadline) {
-      return {
-        status: 'TimedOut',
-        error: { code: 'TimeoutError', message: 'Timeout ao aguardar aceite do ACS.' },
-      };
-    }
-
-    await poller.poll();
-    if (!poller.isDone()) {
-      await delay(intervalMs);
-    }
-  }
-
-  return poller.getResult();
-}
-
 async function enviarViaAcs({ destino, assunto, html, texto, destinoMascarado, logLabel }) {
   if (!ENV.ACS_CONNECTION_STRING) {
     throw new Error('ACS_CONNECTION_STRING não configurado.');
@@ -129,8 +106,17 @@ async function enviarViaAcs({ destino, assunto, html, texto, destinoMascarado, l
     replyTo: ENV.EMAIL_REPLY_TO ? [{ address: ENV.EMAIL_REPLY_TO }] : undefined,
   };
 
-  const poller = await getAcsClient().beginSend(message);
-  const result = await aguardarAcs(poller);
+  const poller = await executarComAbortTimeout(
+    (abortSignal) => getAcsClient().beginSend(message, { abortSignal }),
+    {
+      timeoutMs: ENV.ACS_EMAIL_REQUEST_TIMEOUT_MS,
+      descricao: 'Submissão de e-mail transacional ao ACS',
+    }
+  );
+  const result = await aguardarPollerAcs(poller, {
+    totalTimeoutMs: ENV.ACS_EMAIL_TOTAL_TIMEOUT_MS,
+    requestTimeoutMs: ENV.ACS_EMAIL_REQUEST_TIMEOUT_MS,
+  });
 
   if (result?.status === 'TimedOut') {
     log('warn', `${logLabel} por ACS teve timeout de aceite indeterminado`, {

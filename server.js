@@ -19,6 +19,7 @@ import verificarPermissao from './middleware/verificarPermissao.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { apiLimiter } from './middleware/apiLimiter.js';
+import { trustedBffContext } from './middleware/trustedBff.js';
 
 // 🚏 Rotas
 import routes from './routes/index.js';
@@ -130,6 +131,7 @@ app.use('/api/arquivos/certificados', helmet.crossOriginResourcePolicy({ policy:
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '2mb' })); // limite de payload JSON (uploads são via multipart)
 app.use(compression());
+app.use(trustedBffContext);
 
 // 📝 Agora sim, logamos com userId e tipo corretos
 app.use(requestLogger);

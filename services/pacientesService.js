@@ -661,6 +661,49 @@ export const pacientesService = {
     }
   },
 
+  async criarSocial(dados, reqLike = null) {
+    const oauthCadastroToken = dados?.oauthCadastroToken ?? dados?.OAuthCadastroToken ?? null;
+    const oauthCadastro = authService.validarOAuthCadastroToken(oauthCadastroToken);
+    if (!oauthCadastro) {
+      throw httpError('Sessão Apple/Google obrigatória para o cadastro.', 401);
+    }
+    const camposObrigatorios = [
+      dados?.Telefone ?? dados?.telefone,
+      dados?.DataNascimento ?? dados?.dataNascimento,
+      dados?.Cep ?? dados?.cep,
+      dados?.EnderecoResidencial ?? dados?.enderecoResidencial,
+      dados?.BairroResidencial ?? dados?.bairroResidencial,
+      dados?.Cidade ?? dados?.cidade,
+      dados?.Estado ?? dados?.estado,
+      dados?.ContatoVerificationProof ?? dados?.contatoVerificationProof,
+    ];
+    if (camposObrigatorios.some((value) => !String(value ?? '').trim())) {
+      throw httpError('Telefone validado, data de nascimento e endereço residencial são obrigatórios.', 422);
+    }
+
+    const senhaDescartavel = `${crypto.randomBytes(32).toString('base64url')}Aa1!`;
+    const paciente = await this.criar({
+      ...dados,
+      Senha: senhaDescartavel,
+      oauthCadastroToken,
+    });
+
+    const sessao = await authService.loginOAuth({
+      provedor: oauthCadastro.provider,
+      sub: oauthCadastro.subject,
+      email: dados?.Email ?? dados?.email ?? paciente?.Email ?? null,
+      nome: dados?.Nome ?? dados?.nome ?? paciente?.Nome ?? null,
+      emailVerificado: true,
+    }, reqLike);
+
+    return {
+      mensagem: 'Cadastro social concluído com sucesso.',
+      token: sessao.token,
+      refreshToken: sessao.refreshToken,
+      usuario: sessao.usuario,
+    };
+  },
+
   async ativarPreCadastro(payload = {}, reqLike = null) {
     const CPF = normalizeDigits(payload?.cpf ?? payload?.CPF);
     const Email = normalizeEmail(payload?.email ?? payload?.Email);

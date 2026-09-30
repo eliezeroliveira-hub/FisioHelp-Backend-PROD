@@ -236,6 +236,7 @@ const consultasController = {
       if (payload.valorConsulta !== undefined && payload.ValorConsulta === undefined) payload.ValorConsulta = payload.valorConsulta;
       if (payload.duracaoMinutos !== undefined && payload.DuracaoMinutos === undefined) payload.DuracaoMinutos = payload.duracaoMinutos;
       if (payload.especialidadeId !== undefined && payload.EspecialidadeId === undefined) payload.EspecialidadeId = payload.especialidadeId;
+      if (payload.canalOrigem !== undefined && payload.CanalOrigem === undefined) payload.CanalOrigem = payload.canalOrigem;
 
       if (isTipo(usuario, 'Paciente')) payload.PacienteId = Number(usuario.id);
 
@@ -265,6 +266,7 @@ const consultasController = {
       if (payload.valorConsulta !== undefined && payload.ValorConsulta === undefined) payload.ValorConsulta = payload.valorConsulta;
       if (payload.duracaoMinutos !== undefined && payload.DuracaoMinutos === undefined) payload.DuracaoMinutos = payload.duracaoMinutos;
       if (payload.especialidadeId !== undefined && payload.EspecialidadeId === undefined) payload.EspecialidadeId = payload.especialidadeId;
+      if (payload.canalOrigem !== undefined && payload.CanalOrigem === undefined) payload.CanalOrigem = payload.canalOrigem;
 
       if (isTipo(usuario, 'Paciente')) payload.PacienteId = Number(usuario.id);
 
@@ -293,6 +295,7 @@ const consultasController = {
       if (payload.valorConsulta !== undefined && payload.ValorConsulta === undefined) payload.ValorConsulta = payload.valorConsulta;
       if (payload.duracaoMinutos !== undefined && payload.DuracaoMinutos === undefined) payload.DuracaoMinutos = payload.duracaoMinutos;
       if (payload.especialidadeId !== undefined && payload.EspecialidadeId === undefined) payload.EspecialidadeId = payload.especialidadeId;
+      if (payload.canalOrigem !== undefined && payload.CanalOrigem === undefined) payload.CanalOrigem = payload.canalOrigem;
       if (payload.metodo !== undefined && payload.Metodo === undefined) payload.Metodo = payload.metodo;
       if (payload.pacoteId !== undefined && payload.PacoteId === undefined) payload.PacoteId = payload.pacoteId;
       if (payload.aceitouSumarioContrato !== undefined && payload.AceitouSumarioContrato === undefined) {

@@ -1373,7 +1373,7 @@ async function selecionarPacoteDisponivelParaConsulta(
 }
 
 async function prepararDadosCriacaoConsulta(
-  { PacienteId, FisioterapeutaId, DataHora, Observacoes = null, ValorConsulta = 0, DuracaoMinutos = null, EspecialidadeId = null },
+  { PacienteId, FisioterapeutaId, DataHora, Observacoes = null, ValorConsulta = 0, DuracaoMinutos = null, EspecialidadeId = null, CanalOrigem = null },
   usuario
 ) {
   requireUser(usuario);
@@ -1495,7 +1495,9 @@ async function prepararDadosCriacaoConsulta(
     observacoes: obs,
     valorFinal,
     duracaoMin,
-    origemAgendamento: 'PacienteApp',
+    origemAgendamento: String(CanalOrigem || '').trim().toLowerCase() === 'web'
+      ? 'PacienteWeb'
+      : 'PacienteApp',
     especialidadeId: especialidadeIdFinal,
     prestador
   };
@@ -2411,7 +2413,7 @@ const consultasService = {
    * Cria consulta (paciente cria) - mantém fluxo atual
    */
   async criar(
-    { PacienteId, FisioterapeutaId, DataHora, Observacoes = null, ValorConsulta = 0, DuracaoMinutos = null, EspecialidadeId = null },
+    { PacienteId, FisioterapeutaId, DataHora, Observacoes = null, ValorConsulta = 0, DuracaoMinutos = null, EspecialidadeId = null, CanalOrigem = null },
     usuario = null
   ) {
     const {
@@ -2423,7 +2425,7 @@ const consultasService = {
       origemAgendamento,
       especialidadeId
     } = await prepararDadosCriacaoConsulta(
-      { PacienteId, FisioterapeutaId, DataHora, Observacoes, ValorConsulta, DuracaoMinutos, EspecialidadeId },
+      { PacienteId, FisioterapeutaId, DataHora, Observacoes, ValorConsulta, DuracaoMinutos, EspecialidadeId, CanalOrigem },
       usuario
     );
 
@@ -2475,7 +2477,7 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
   },
 
   async opcoesPagamentoPreAgendamento(
-    { PacienteId, FisioterapeutaId, DataHora, Observacoes = null, ValorConsulta = 0, DuracaoMinutos = null, EspecialidadeId = null },
+    { PacienteId, FisioterapeutaId, DataHora, Observacoes = null, ValorConsulta = 0, DuracaoMinutos = null, EspecialidadeId = null, CanalOrigem = null },
     usuario = null
   ) {
     const {
@@ -2488,7 +2490,7 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
       especialidadeId,
       prestador
     } = await prepararDadosCriacaoConsulta(
-      { PacienteId, FisioterapeutaId, DataHora, Observacoes, ValorConsulta, DuracaoMinutos, EspecialidadeId },
+      { PacienteId, FisioterapeutaId, DataHora, Observacoes, ValorConsulta, DuracaoMinutos, EspecialidadeId, CanalOrigem },
       usuario
     );
 
@@ -2665,7 +2667,8 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
       AceitouSumarioContrato = false,
       IpAceite = null,
       UserAgentAceite = null,
-      OrigemAceite = 'AgendamentoConsulta'
+      OrigemAceite = 'AgendamentoConsulta',
+      CanalOrigem = null
     },
     usuario = null
   ) {
@@ -2689,7 +2692,7 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
       origemAgendamento,
       especialidadeId
     } = await prepararDadosCriacaoConsulta(
-      { PacienteId, FisioterapeutaId, DataHora, Observacoes, ValorConsulta, DuracaoMinutos, EspecialidadeId },
+      { PacienteId, FisioterapeutaId, DataHora, Observacoes, ValorConsulta, DuracaoMinutos, EspecialidadeId, CanalOrigem },
       usuario
     );
 
