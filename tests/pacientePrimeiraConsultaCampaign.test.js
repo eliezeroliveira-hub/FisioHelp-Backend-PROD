@@ -28,12 +28,14 @@ test('configuração valida piloto, exclusões e links aprovados', () => {
   const config = carregarConfigPacientePrimeiraConsulta(baseEnv({
     PACIENTE_ATIVACAO_PACIENTE_EMAIL: ' PLAY-REVIEW-PACIENTE@FISIOHELP.COM.BR ',
     PACIENTE_ATIVACAO_PILOTO_FORCAR_DIA: '1',
+    PACIENTE_ATIVACAO_PILOTO_EXCLUSIVO: 'true',
     PACIENTE_ATIVACAO_PACIENTE_IDS_EXCLUIDOS: '[2, 2, 7]',
     PACIENTE_ATIVACAO_PACIENTE_EMAILS_EXCLUIDOS: '["teste@example.com"]',
   }));
 
   assert.equal(config.pacienteEmailAlvo, 'play-review-paciente@fisiohelp.com.br');
   assert.equal(config.pilotoForcarDia, 1);
+  assert.equal(config.pilotoExclusivo, true);
   assert.deepEqual(config.pacienteIdsExcluidos, [2, 7]);
   assert.deepEqual(config.pacienteEmailsExcluidos, ['teste@example.com']);
   assert.deepEqual(config.dominiosTeste, ['fisiohelp.com.br']);
@@ -45,6 +47,7 @@ test('recusa configuração inválida ou ciclo forçado sem piloto', () => {
     [{ PACIENTE_ATIVACAO_CAMPANHA_ID: 'INVÁLIDA' }, /\[a-z0-9-\]/],
     [{ PACIENTE_ATIVACAO_DATA_INICIAL: '21-10-2026' }, /YYYY-MM-DD/],
     [{ PACIENTE_ATIVACAO_PILOTO_FORCAR_DIA: '1' }, /exige um e-mail piloto/],
+    [{ PACIENTE_ATIVACAO_PILOTO_EXCLUSIVO: 'true' }, /exige PACIENTE_ATIVACAO_PACIENTE_EMAIL/],
     [{
       PACIENTE_ATIVACAO_PACIENTE_EMAIL: 'piloto@example.com',
       PACIENTE_ATIVACAO_PILOTO_FORCAR_DIA: '3',

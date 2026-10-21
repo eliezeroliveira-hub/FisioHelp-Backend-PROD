@@ -182,6 +182,15 @@ export function carregarConfigPacientePrimeiraConsulta(env = process.env) {
     env.PACIENTE_ATIVACAO_PILOTO_FORCAR_DIA,
     Boolean(pacienteEmailAlvo)
   );
+  const pilotoExclusivo = boolEnv(
+    env.PACIENTE_ATIVACAO_PILOTO_EXCLUSIVO,
+    false
+  );
+  if (pilotoExclusivo && !pacienteEmailAlvo) {
+    throw configError(
+      'PACIENTE_ATIVACAO_PILOTO_EXCLUSIVO exige PACIENTE_ATIVACAO_PACIENTE_EMAIL.'
+    );
+  }
 
   return {
     enabled,
@@ -190,6 +199,7 @@ export function carregarConfigPacientePrimeiraConsulta(env = process.env) {
     dataInicial,
     pacienteEmailAlvo,
     pilotoForcarDia,
+    pilotoExclusivo,
     pacienteIdsExcluidos: parseExcludedIds(
       env.PACIENTE_ATIVACAO_PACIENTE_IDS_EXCLUIDOS
     ),
@@ -250,12 +260,14 @@ export function obterControleDespachoPacientePrimeiraConsulta(
     return {
       hojeBrasil,
       emailEnabled: config.enabled && config.emailEnabled,
+      pilotoExclusivo: config.enabled && config.pilotoExclusivo,
       configError: null,
     };
   } catch (error) {
     return {
       hojeBrasil,
       emailEnabled: false,
+      pilotoExclusivo: false,
       configError: error?.message || 'Configuração da ativação de pacientes inválida.',
     };
   }

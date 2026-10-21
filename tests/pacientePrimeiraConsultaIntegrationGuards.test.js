@@ -68,6 +68,7 @@ test('claim aplica kill switch e revalida ausência de consulta antes do TOP', (
   const topIndex = claim.indexOf('SELECT TOP (@BatchSize)');
   assert.ok(filterIndex >= 0 && filterIndex < topIndex);
   assert.match(claim, /@PacientePrimeiraConsultaEmailEnabled/);
+  assert.match(claim, /@PacientePrimeiraConsultaPilotoExclusivo = 0/);
   assert.match(claim, /FROM dbo\.Consultas c/);
   assert.match(claim, />= @HojeBrasil/);
   assert.match(serviceSource, /pacienteAtivacaoAindaSemConsulta/);

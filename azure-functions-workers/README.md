@@ -174,6 +174,7 @@ consulta antes do envio. Configurações:
 - `PACIENTE_ATIVACAO_BATCH_SIZE=50` e `PACIENTE_ATIVACAO_MAX_BATCHES=20`
 - `PACIENTE_ATIVACAO_PACIENTE_EMAIL=` (piloto controlado)
 - `PACIENTE_ATIVACAO_PILOTO_FORCAR_DIA=` (1, 4 ou 10; somente com e-mail piloto)
+- `PACIENTE_ATIVACAO_PILOTO_EXCLUSIVO=false` (no piloto HML, restringe o claim a esta campanha)
 - `PACIENTE_ATIVACAO_PACIENTE_IDS_EXCLUIDOS=[]`
 - `PACIENTE_ATIVACAO_PACIENTE_EMAILS_EXCLUIDOS=[]`
 - `PACIENTE_ATIVACAO_DOMINIOS_TESTE=fisiohelp.com.br`
@@ -183,7 +184,9 @@ consulta antes do envio. Configurações:
 
 O alvo piloto continua sujeito às validações de conta, e-mail, supressão, ausência de
 consulta e exclusão de fisioterapeutas. A opção de forçar o dia ignora apenas a janela
-temporal. Desligar o worker ou o canal impede o claim dos itens pendentes dessa campanha
+temporal. O piloto exclusivo também exige um e-mail alvo e impede que o processador
+reivindique qualquer outra notificação enquanto o ACS estiver ativo em HML. Desligar o
+worker ou o canal impede o claim dos itens pendentes dessa campanha
 sem afetar e-mails transacionais ou outras campanhas.
 
 Para cancelar itens Jalecos Conforto pendentes, desligue as flags, aguarde mais que o

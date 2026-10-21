@@ -443,6 +443,8 @@ async function reivindicarLote(
   const jalecosConfortoPushEnabled = controleJalecosConforto?.pushEnabled === true;
   const pacientePrimeiraConsultaEmailEnabled =
     controlePacientePrimeiraConsulta?.emailEnabled === true;
+  const pacientePrimeiraConsultaPilotoExclusivo =
+    controlePacientePrimeiraConsulta?.pilotoExclusivo === true;
   const maxEmails60Min = Math.max(
     1,
     Math.min(Number(promocaoEmailMax60Min) || 60, 90)
@@ -470,6 +472,11 @@ async function reivindicarLote(
       'PacientePrimeiraConsultaEmailEnabled',
       sql.Bit,
       pacientePrimeiraConsultaEmailEnabled
+    );
+    req.input(
+      'PacientePrimeiraConsultaPilotoExclusivo',
+      sql.Bit,
+      pacientePrimeiraConsultaPilotoExclusivo
     );
     req.input('PromocaoEmailMax60Min', sql.Int, maxEmails60Min);
     canais.forEach((canal, i) => {
@@ -538,6 +545,11 @@ async function reivindicarLote(
           AND [Status] IN (N'Pendente', N'FalhaTemporaria')
           AND [Tentativas] < [MaxTentativas]
           AND ([ProximaTentativaEm] IS NULL OR [ProximaTentativaEm] <= SYSDATETIME())
+          AND (
+            @PacientePrimeiraConsultaPilotoExclusivo = 0
+            OR CASE WHEN ISJSON([DadosJson]) = 1
+              THEN JSON_VALUE([DadosJson], '$.tipo') END = @PacientePrimeiraConsultaDadosTipo
+          )
           AND (
             NOT ([Canal] = N'email' AND COALESCE([Tipo], N'') = N'Promocao')
             OR @PermitirEmailPromocional = 1
