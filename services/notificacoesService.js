@@ -407,6 +407,7 @@ async function reivindicarLote(
     canaisAtivos = ['push'],
     controleBcmed = null,
     controleJalecosConforto = null,
+    controlePacientePrimeiraConsulta = null,
     promocaoEmailMax60Min = 60,
   } = {},
   usuario = null
@@ -419,7 +420,10 @@ async function reivindicarLote(
 
   const placeholders = canais.map((_, i) => `@Canal${i}`).join(', ');
   const hojeConfigurado = String(
-    controleBcmed?.hojeBrasil || controleJalecosConforto?.hojeBrasil || ''
+    controleBcmed?.hojeBrasil ||
+      controleJalecosConforto?.hojeBrasil ||
+      controlePacientePrimeiraConsulta?.hojeBrasil ||
+      ''
   ).trim();
   const partesHojeBrasil = getAppTimeZoneParts(new Date(), 'America/Sao_Paulo');
   const hojeFallback = [
@@ -437,6 +441,8 @@ async function reivindicarLote(
   const bcmedPushEnabled = controleBcmed?.pushEnabled === true;
   const jalecosConfortoEmailEnabled = controleJalecosConforto?.emailEnabled === true;
   const jalecosConfortoPushEnabled = controleJalecosConforto?.pushEnabled === true;
+  const pacientePrimeiraConsultaEmailEnabled =
+    controlePacientePrimeiraConsulta?.emailEnabled === true;
   const maxEmails60Min = Math.max(
     1,
     Math.min(Number(promocaoEmailMax60Min) || 60, 90)
@@ -455,6 +461,16 @@ async function reivindicarLote(
     );
     req.input('JalecosConfortoEmailEnabled', sql.Bit, jalecosConfortoEmailEnabled);
     req.input('JalecosConfortoPushEnabled', sql.Bit, jalecosConfortoPushEnabled);
+    req.input(
+      'PacientePrimeiraConsultaDadosTipo',
+      sql.NVarChar(100),
+      'campanha_ativacao_primeira_consulta_paciente'
+    );
+    req.input(
+      'PacientePrimeiraConsultaEmailEnabled',
+      sql.Bit,
+      pacientePrimeiraConsultaEmailEnabled
+    );
     req.input('PromocaoEmailMax60Min', sql.Int, maxEmails60Min);
     canais.forEach((canal, i) => {
       req.input(`Canal${i}`, sql.NVarChar(10), canal);
@@ -531,7 +547,11 @@ async function reivindicarLote(
               CASE WHEN ISJSON([DadosJson]) = 1
                 THEN JSON_VALUE([DadosJson], '$.tipo') END,
               N''
-            ) NOT IN (@BcmedDadosTipo, @JalecosConfortoDadosTipo)
+            ) NOT IN (
+              @BcmedDadosTipo,
+              @JalecosConfortoDadosTipo,
+              @PacientePrimeiraConsultaDadosTipo
+            )
             OR (
               CASE WHEN ISJSON([DadosJson]) = 1
                 THEN JSON_VALUE([DadosJson], '$.tipo') END = @BcmedDadosTipo
@@ -558,6 +578,30 @@ async function reivindicarLote(
               AND (
                 ([Canal] = N'email' AND @JalecosConfortoEmailEnabled = 1)
                 OR ([Canal] = N'push' AND @JalecosConfortoPushEnabled = 1)
+              )
+              AND TRY_CONVERT(
+                date,
+                CASE WHEN ISJSON([DadosJson]) = 1
+                  THEN JSON_VALUE([DadosJson], '$.expiraEm') END,
+                23
+              ) IS NOT NULL
+              AND TRY_CONVERT(
+                date,
+                CASE WHEN ISJSON([DadosJson]) = 1
+                  THEN JSON_VALUE([DadosJson], '$.expiraEm') END,
+                23
+              ) >= @HojeBrasil
+            )
+            OR (
+              CASE WHEN ISJSON([DadosJson]) = 1
+                THEN JSON_VALUE([DadosJson], '$.tipo') END = @PacientePrimeiraConsultaDadosTipo
+              AND [UsuarioTipo] = N'Paciente'
+              AND [Canal] = N'email'
+              AND @PacientePrimeiraConsultaEmailEnabled = 1
+              AND NOT EXISTS (
+                SELECT 1
+                FROM dbo.Consultas c
+                WHERE c.PacienteId = [UsuarioId]
               )
               AND TRY_CONVERT(
                 date,
@@ -909,9 +953,33 @@ async function processarPushItem(item, usuario = null) {
   return { status: 'FalhaDefinitiva', ...resultados };
 }
 
+async function pacienteAtivacaoAindaSemConsulta(item, usuario = null) {
+  const ctx = usuario?.tipo && usuario?.id ? usuario : contextoSistema();
+  const pacienteId = normalizarIdPositivo(item?.UsuarioId, 'pacienteId');
+  const result = await queryWithContext(ctx, (req) => {
+    req.input('PacienteId', sql.Int, pacienteId);
+  }, `
+    SELECT CAST(CASE WHEN EXISTS (
+      SELECT 1 FROM dbo.Consultas c WHERE c.PacienteId = @PacienteId
+    ) THEN 0 ELSE 1 END AS bit) AS Elegivel;
+  `, { requireContext: true });
+  return Boolean(result.recordset?.[0]?.Elegivel);
+}
+
 async function processarEmailItem(item, usuario = null) {
   const filaId = normalizarIdPositivo(item?.Id, 'filaId');
   const dados = parseDadosJsonSeguro(item.DadosJson) || {};
+  if (
+    dados?.tipo === 'campanha_ativacao_primeira_consulta_paciente' &&
+    !(await pacienteAtivacaoAindaSemConsulta(item, usuario))
+  ) {
+    await marcarFalhaDefinitiva(
+      filaId,
+      'Paciente já possui consulta; ativação encerrada antes do envio.',
+      usuario
+    );
+    return { status: 'FalhaDefinitiva', canal: 'email', motivo: 'paciente_com_consulta' };
+  }
   const operationId = criarOperationIdFilaNotificacao(filaId, ENV.DB_NAME);
   const resumeFrom = String(dados?.acsEmail?.resumeFrom || '').trim() || null;
   const operationIdPersistido = String(dados?.acsEmail?.operationId || '').trim();

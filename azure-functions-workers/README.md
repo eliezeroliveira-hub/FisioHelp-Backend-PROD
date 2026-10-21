@@ -15,6 +15,7 @@ Este pacote e separado do Function App de SQL jobs em `azure-functions/`.
 - `enfileirarProgramaIndicacaoFisioterapeuta`: chama workers/programaIndicacaoFisioterapeutaWorker.tick() no primeiro dia de cada mês, às 12:00 UTC (09:00 em São Paulo).
 - `enfileirarBeneficioBcmedFisioterapeuta`: chama `workers/beneficioBcmedFisioterapeutaWorker.tick()` diariamente, às 12:00 UTC (09:00 em São Paulo), sem execução no startup.
 - `enfileirarBeneficioJalecosConfortoFisioterapeuta`: chama `workers/beneficioJalecosConfortoFisioterapeutaWorker.tick()` diariamente, às 12:10 UTC (09:10 em São Paulo), sem execução no startup.
+- `enfileirarAtivacaoPrimeiraConsultaPaciente`: chama `workers/pacientePrimeiraConsultaWorker.tick()` a cada hora, no minuto 25, sem execução no startup.
 
 ## Deploy
 
@@ -157,6 +158,33 @@ Configuracoes:
 O worker fica desativado por padrao. Datas e identificador devem ser definidos apenas
 para cada piloto e, depois, novamente para a campanha oficial. A data inicial faz parte
 da chave de deduplicacao, evitando colisao entre piloto, campanha oficial e renovacao.
+
+O fluxo `enfileirarAtivacaoPrimeiraConsultaPaciente` envia somente e-mail para pacientes
+ativos, com e-mail verificado e sem nenhuma consulta. Pacientes que também tenham cadastro
+de fisioterapeuta, e-mails suprimidos e contas dos domínios de teste configurados ficam de
+fora. Os ciclos usam a data individual do cadastro nos dias 1, 4 e 10. Para a base anterior
+à ativação, `PACIENTE_ATIVACAO_DATA_INICIAL` funciona como a data âncora comum, evitando
+disparos simultâneos dos três ciclos. O claim e o processamento revalidam a ausência de
+consulta antes do envio. Configurações:
+
+- `PACIENTE_ATIVACAO_WORKER_ENABLED=false`
+- `PACIENTE_ATIVACAO_EMAIL_ENABLED=true`
+- `PACIENTE_ATIVACAO_CAMPANHA_ID=`
+- `PACIENTE_ATIVACAO_DATA_INICIAL=` (YYYY-MM-DD)
+- `PACIENTE_ATIVACAO_BATCH_SIZE=50` e `PACIENTE_ATIVACAO_MAX_BATCHES=20`
+- `PACIENTE_ATIVACAO_PACIENTE_EMAIL=` (piloto controlado)
+- `PACIENTE_ATIVACAO_PILOTO_FORCAR_DIA=` (1, 4 ou 10; somente com e-mail piloto)
+- `PACIENTE_ATIVACAO_PACIENTE_IDS_EXCLUIDOS=[]`
+- `PACIENTE_ATIVACAO_PACIENTE_EMAILS_EXCLUIDOS=[]`
+- `PACIENTE_ATIVACAO_DOMINIOS_TESTE=fisiohelp.com.br`
+- `PACIENTE_ATIVACAO_FISIOTERAPEUTAS_URL=`
+- `PACIENTE_ATIVACAO_VIDEO_URL=` e `PACIENTE_ATIVACAO_VIDEO_THUMBNAIL_URL=`
+- `PACIENTE_ATIVACAO_APP_STORE_URL=` e `PACIENTE_ATIVACAO_GOOGLE_PLAY_URL=`
+
+O alvo piloto continua sujeito às validações de conta, e-mail, supressão, ausência de
+consulta e exclusão de fisioterapeutas. A opção de forçar o dia ignora apenas a janela
+temporal. Desligar o worker ou o canal impede o claim dos itens pendentes dessa campanha
+sem afetar e-mails transacionais ou outras campanhas.
 
 Para cancelar itens Jalecos Conforto pendentes, desligue as flags, aguarde mais que o
 prazo de recuperacao de itens travados e execute duas rodadas, sempre iniciando por dry-run:

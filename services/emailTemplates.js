@@ -2,6 +2,7 @@ import { montarEmailLembretePerfilFisioterapeuta } from './perfilFisioterapeutaE
 import { montarEmailProgramaIndicacaoFisioterapeuta } from './programaIndicacaoEmailTemplate.js';
 import { montarEmailBeneficioBcmedFisioterapeuta } from './beneficioBcmedEmailTemplate.js';
 import { montarEmailBeneficioJalecosConfortoFisioterapeuta } from './beneficioJalecosConfortoEmailTemplate.js';
+import { montarEmailPacientePrimeiraConsulta } from './pacientePrimeiraConsultaEmailTemplate.js';
 import { montarDocumentoProfissionalApresentacao } from '../utils/professionalDocumentPresentation.js';
 
 const FOOTER = 'Mensagem automática — esta caixa não é monitorada. Fale com suporte@fisiohelp.com.br.';
@@ -615,6 +616,17 @@ export function montarEmailNotificacao({ titulo, mensagem, dados = null } = {}) 
       variacao: dados?.variacao,
       beneficioUrl: dados?.beneficioUrl,
       cupom: dados?.cupom,
+    });
+  }
+
+  if (dados?.emailModelo === 'ativacao_primeira_consulta_paciente') {
+    return montarEmailPacientePrimeiraConsulta({
+      nomePaciente: dados?.pacienteNome,
+      fisioterapeutasUrl: dados?.fisioterapeutasUrl,
+      videoUrl: dados?.videoUrl,
+      videoThumbnailUrl: dados?.videoThumbnailUrl,
+      appStoreUrl: dados?.appStoreUrl,
+      googlePlayUrl: dados?.googlePlayUrl,
     });
   }
 

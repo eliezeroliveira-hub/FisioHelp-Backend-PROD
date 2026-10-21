@@ -6,6 +6,7 @@ import { isWhatsAppProviderReal } from '../providers/whatsappProvider.js';
 import notificacoesService from '../services/notificacoesService.js';
 import { obterControleDespachoBeneficioBcmed } from '../utils/beneficioBcmedCampaign.js';
 import { obterControleDespachoBeneficioJalecosConforto } from '../utils/beneficioJalecosConfortoCampaign.js';
+import { obterControleDespachoPacientePrimeiraConsulta } from '../utils/pacientePrimeiraConsultaCampaign.js';
 
 function boolEnv(value, fallback = true) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -38,6 +39,7 @@ let missingStructureWarned = false;
 let noActiveChannelsWarned = false;
 let bcmedConfigWarning = null;
 let jalecosConfortoConfigWarning = null;
+let pacientePrimeiraConsultaConfigWarning = null;
 
 function usuarioSistema() {
   return { tipo: 'Admin', id: Number(ENV.SYSTEM_ADMIN_ID ?? 1) };
@@ -116,12 +118,29 @@ export async function tick() {
       jalecosConfortoConfigWarning = null;
     }
 
+    const controlePacientePrimeiraConsulta =
+      obterControleDespachoPacientePrimeiraConsulta(process.env, new Date());
+    if (
+      controlePacientePrimeiraConsulta.configError &&
+      pacientePrimeiraConsultaConfigWarning !==
+        controlePacientePrimeiraConsulta.configError
+    ) {
+      pacientePrimeiraConsultaConfigWarning =
+        controlePacientePrimeiraConsulta.configError;
+      log('error', 'PACIENTE_ATIVACAO_CONFIG_INVALID no processador; itens da campanha permanecerão pendentes.', {
+        erro: controlePacientePrimeiraConsulta.configError,
+      });
+    } else if (!controlePacientePrimeiraConsulta.configError) {
+      pacientePrimeiraConsultaConfigWarning = null;
+    }
+
     const lote = await notificacoesService.reivindicarLote(
       {
         batchSize: config.batchSize,
         canaisAtivos: canais,
         controleBcmed,
         controleJalecosConforto,
+        controlePacientePrimeiraConsulta,
         promocaoEmailMax60Min: config.promocaoEmailMax60Min,
       },
       usuario

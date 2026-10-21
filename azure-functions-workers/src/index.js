@@ -13,3 +13,4 @@ import './functions/enfileirarLembretePerfilFisioterapeuta.js';
 import './functions/enfileirarProgramaIndicacaoFisioterapeuta.js';
 import './functions/enfileirarBeneficioBcmedFisioterapeuta.js';
 import './functions/enfileirarBeneficioJalecosConfortoFisioterapeuta.js';
+import './functions/enfileirarAtivacaoPrimeiraConsultaPaciente.js';
