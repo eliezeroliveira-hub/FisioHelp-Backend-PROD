@@ -3,6 +3,7 @@ import parametrosSistemaController from '../controllers/parametrosSistemaControl
 
 const router = express.Router();
 
+router.get('/operacao', parametrosSistemaController.obterOperacao);
 router.get('/valor-minimo-consulta', parametrosSistemaController.obterValorMinimoConsulta);
 router.get('/taxa-intermediacao', parametrosSistemaController.obterTaxaIntermediacao);
 router.get('/bancos', parametrosSistemaController.obterBancos);

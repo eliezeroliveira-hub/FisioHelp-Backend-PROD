@@ -33,7 +33,7 @@ test('rota interna rejeita chamada direta e cadastro social exige o BFF', () => 
   };
   requireTrustedBff({}, res, () => assert.fail('não deveria liberar'));
   assert.equal(status, 403);
-  assert.match(source('routes/pacientes.js'), /router\.post\('\/social', requireTrustedBff, pacientesController\.criarSocial\)/);
+  assert.match(source('routes/pacientes.js'), /router\.post\('\/social', requireTrustedBff, requireNewRegistrationsEnabled, pacientesController\.criarSocial\)/);
 });
 
 test('canal web grava PacienteWeb e mantém PacienteApp como padrão', () => {

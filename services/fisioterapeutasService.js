@@ -41,6 +41,7 @@ import {
   ESTADO_CREFITO_IMUTAVEL_MESSAGE,
   normalizeUf,
 } from '../utils/jurisdiction.js';
+import { assertOperationEnabled } from '../utils/operationStatus.js';
 
 const APP_TIME_ZONE = 'America/Sao_Paulo';
 
@@ -1495,6 +1496,8 @@ const fisioterapeutasService = {
   //  CRIAR FISIOTERAPEUTA – com normalização de CREFITO
   // ================================================================
   async criar(dados) {
+    assertOperationEnabled('cadastro');
+
     const {
       Nome,
       CREFITO,
@@ -2886,6 +2889,8 @@ const fisioterapeutasService = {
   //  PRÉ-CADASTRO DE PACIENTE (carteira/vínculo)
   // ==================
   async preCadastrarPaciente(fisioterapeutaId, dados = {}, usuario = null) {
+    assertOperationEnabled('cadastro');
+
     const ctx = safeUsuario(usuario) || { id: fisioterapeutaId, tipo: 'Fisioterapeuta' };
 
     // Anti-spoof: só o próprio fisio logado pode pré-cadastrar paciente na sua carteira

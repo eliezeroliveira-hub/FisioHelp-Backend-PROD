@@ -36,7 +36,8 @@ function handleError(res, erro, fallbackMessage) {
       status >= 500
         ? 'Erro interno do servidor.'
         : (sqlBusinessError?.message || erro?.message || fallbackMessage || 'Erro interno.'),
-    detalhes: erro?.details ?? erro?.detalhes ?? undefined
+    detalhes: erro?.details ?? erro?.detalhes ?? undefined,
+    codigo: status >= 500 ? undefined : (erro?.code || erro?.codigo || undefined)
   });
 }
 

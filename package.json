@@ -11,6 +11,10 @@
     "check:env": "node -e \"require('dotenv').config(); console.log(process.env);\"",
     "uploads:blob:dry-run": "node scripts/migrarUploadsParaBlob.js --dry-run",
     "uploads:blob:migrate": "node scripts/migrarUploadsParaBlob.js",
+    "encerramento:filas": "node scripts/encerramento/encerrarFilasIncompativeis.mjs",
+    "encerramento:pendencias": "node scripts/encerramento/verificarPendenciasEncerramento.mjs",
+    "encerramento:prontuarios:inventario": "node scripts/encerramento/inventariarProntuarios.mjs",
+    "encerramento:prontuarios:exportar": "node scripts/encerramento/exportarProntuariosProtegidos.mjs",
     "test": "node --test"
   },
   "keywords": [

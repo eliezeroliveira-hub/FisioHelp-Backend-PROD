@@ -1,5 +1,6 @@
 import { logger } from '../config/logger.js';
 import { ENV } from '../config/env.js';
+import { OPERATION_CODES } from '../utils/operationStatus.js';
 
 /**
  * 🧱 Middleware global de tratamento de erros
@@ -57,6 +58,9 @@ export function errorHandler(err, req, res, next) {
     erro: 'Erro interno do servidor.',
   };
 
+  const operationalCode = String(err?.code || err?.codigo || '').trim();
+  const isOperationDisabled = Object.hasOwn(OPERATION_CODES, operationalCode);
+
   const exposeDevMessage =
     ENV.NODE_ENV === 'development' &&
     String(process.env.EXPOSE_DEV_ERROR_MESSAGE || '').trim().toLowerCase() === 'true';
@@ -66,7 +70,11 @@ export function errorHandler(err, req, res, next) {
     resposta.mensagem = err?.message;
   }
 
-  if (isSensitiveSqlAuthError) {
+  if (isOperationDisabled) {
+    resposta.sucesso = false;
+    resposta.erro = err.message;
+    resposta.codigo = operationalCode;
+  } else if (isSensitiveSqlAuthError) {
     resposta.erro = 'Erro interno de autenticação. Contate o suporte.';
   } else if (isSensitiveSqlObjectError) {
     resposta.erro = 'Erro interno. Contate o suporte.';

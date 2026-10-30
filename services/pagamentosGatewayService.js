@@ -9,6 +9,7 @@ import notificacoesDispatch from './notificacoesDispatch.js';
 import { isValidCPF, isValidEmail } from '../utils/identityValidators.js';
 import { agoraBrasilDate, formatBrasilDateTimeLocalIso } from '../utils/appDateTime.js';
 import { validarJurisdicaoAtendimentoAtual } from '../utils/jurisdiction.js';
+import { assertOperationEnabled } from '../utils/operationStatus.js';
 
 const ASAAS_PACOTE_MAX_PARCELAS = 10;
 const ASAAS_WEB_CHECKOUT_TIMEOUT_MS = 30_000;
@@ -576,6 +577,8 @@ const pagamentosGatewayService = {
   },
 
   async criarCheckoutAsaas({ consultaId, billingType, reutilizarCheckoutAtivo = false, webOrigin = null }, usuario) {
+    assertOperationEnabled('contratacao');
+
     const ctx = safeUsuario(usuario);
     if (!ctx?.id || !ctx?.tipo) {
       throw new HttpError(401, 'Não autenticado.');
@@ -812,6 +815,8 @@ const pagamentosGatewayService = {
   },
 
   async criarCheckoutPacoteAsaas({ pacoteId, billingType }, usuario) {
+    assertOperationEnabled('contratacao');
+
     const ctx = safeUsuario(usuario);
     if (!ctx?.id || !ctx?.tipo) {
       throw new HttpError(401, 'Não autenticado.');

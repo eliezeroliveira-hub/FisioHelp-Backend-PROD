@@ -10,6 +10,7 @@ import { log } from '../config/logger.js';
 import { agoraBrasilDate } from '../utils/appDateTime.js';
 import { montarPrestadorCheckout } from '../utils/professionalCheckout.js';
 import { validarJurisdicaoAtendimentoAtual } from '../utils/jurisdiction.js';
+import { assertOperationEnabled } from '../utils/operationStatus.js';
 
 // ---------------- helpers ----------------
 function assertId(v, name = 'id') {
@@ -695,6 +696,8 @@ async function calcularCancelamentoPacote(pacote, usuario) {
 // ---------------- service ----------------
 const pacotesService = {
   async resumoPreCompra(dados, usuario) {
+    assertOperationEnabled('contratacao');
+
     requireUser(usuario);
 
     if (!isPaciente(usuario) && !isAdmin(usuario)) {
@@ -804,6 +807,8 @@ const pacotesService = {
    * }
    */
   async comprar(dados, usuario) {
+    assertOperationEnabled('contratacao');
+
     requireUser(usuario);
 
     const pacienteId = isAdmin(usuario)
@@ -915,6 +920,8 @@ const pacotesService = {
    * - quando confirmado como "Pago", gera créditos e ativa o pacote
    */
   async confirmarPagamento(pacoteId, dados, usuario) {
+    assertOperationEnabled('contratacao');
+
     requireUser(usuario);
 
     const id = assertId(pacoteId, 'pacoteId');

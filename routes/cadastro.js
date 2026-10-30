@@ -10,8 +10,13 @@ import {
   cadastroPacienteEmailLimiter,
   cadastroPacienteTelefoneLimiter,
 } from '../middleware/apiLimiter.js';
+import { requireNewRegistrationsEnabled } from '../middleware/operationStatus.js';
 
 const router = express.Router();
+
+// Somente códigos/sessões de cadastro novo. Verificação de contato de contas
+// existentes vive em /pacientes/:id/contato/* e /fisioterapeutas/:id/contato/*.
+router.use(requireNewRegistrationsEnabled);
 
 router.get('/verificar', cadastroController.verificar);
 

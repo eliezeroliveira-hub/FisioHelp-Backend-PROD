@@ -11,6 +11,7 @@ import {
   mapAuthLoginResult,
   normalizeAuthUserType as normalizeTipoUsuario,
 } from "../utils/authLoginResult.js";
+import { assertOperationEnabled } from "../utils/operationStatus.js";
 
 const REFRESH_DAYS = Number(ENV.REFRESH_TOKEN_DAYS || 30);
 const OAUTH_SIGNUP_TOKEN_TTL_MINUTES = parsePositiveInt(process.env.OAUTH_SIGNUP_TOKEN_TTL_MINUTES, 60);
@@ -881,6 +882,8 @@ export const authService = {
   },
 
   async criarOAuthCadastroToken(payload) {
+    assertOperationEnabled('cadastro');
+
     const provider = normalizeOAuthProvider(payload?.provedor);
     const subject = normalizeOAuthSubject(payload?.sub);
     const email = payload?.email ? normalizeEmail(payload.email) : null;

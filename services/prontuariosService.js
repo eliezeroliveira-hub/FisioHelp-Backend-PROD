@@ -1244,10 +1244,10 @@ function extractClinicalEntries(value) {
   return entries.filter((entry) => trimOrNull(entry.text));
 }
 
-function gerarPdfBuffer(prontuario) {
+export function gerarPdfBuffer(prontuario, pdfOptions = {}) {
   return new Promise((resolve, reject) => {
     try {
-      const doc = new PDFDocument({ size: 'A4', margin: 48 });
+      const doc = new PDFDocument({ size: 'A4', margin: 48, ...pdfOptions });
 
       const chunks = [];
       let totalBytes = 0;

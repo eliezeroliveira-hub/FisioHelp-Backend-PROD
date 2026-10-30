@@ -19,6 +19,7 @@ import {
   CHECKIN_ANTECEDENCIA_MIN,
   TOKEN_VALIDACAO_EXPIRACAO_MIN as TOKEN_EXPIRACAO_MIN,
 } from '../config/consultaRules.js';
+import { assertOperationEnabled } from '../utils/operationStatus.js';
 
 /**
  * Executa uma query garantindo SESSION_CONTEXT no MESMO batch/Request.
@@ -2416,6 +2417,8 @@ const consultasService = {
     { PacienteId, FisioterapeutaId, DataHora, Observacoes = null, ValorConsulta = 0, DuracaoMinutos = null, EspecialidadeId = null, CanalOrigem = null },
     usuario = null
   ) {
+    assertOperationEnabled('agendamento');
+
     const {
       pacienteId,
       fisioterapeutaId,
@@ -2480,6 +2483,9 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
     { PacienteId, FisioterapeutaId, DataHora, Observacoes = null, ValorConsulta = 0, DuracaoMinutos = null, EspecialidadeId = null, CanalOrigem = null },
     usuario = null
   ) {
+    assertOperationEnabled('agendamento');
+    assertOperationEnabled('contratacao');
+
     const {
       pacienteId,
       fisioterapeutaId,
@@ -2672,6 +2678,9 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
     },
     usuario = null
   ) {
+    assertOperationEnabled('agendamento');
+    assertOperationEnabled('contratacao');
+
     const metodoRaw = String(Metodo ?? '').trim().toLowerCase();
     let metodo = null;
     if (metodoRaw === 'credito' || metodoRaw === 'créditos' || metodoRaw === 'creditos') metodo = 'Credito';
@@ -3392,6 +3401,8 @@ if (!novoId) throw new HttpError(500, 'Falha ao criar consulta (ConsultaId não 
 
 // REAGENDAR CONSULTA
 async reagendar(consultaId, body, usuario) {
+  assertOperationEnabled('agendamento');
+
   if (!isPaciente(usuario) && !isAdmin(usuario)) {
     throw new HttpError(403, 'Somente Paciente (ou Admin) pode reagendar consulta.');
   }
@@ -3991,6 +4002,8 @@ async decidirNoShowFisio(id, body, usuario) {
   // REAGENDAR (registra decisão e impede trocar depois)
   // =========================
   if (opcao === 'Reagendar') {
+    assertOperationEnabled('agendamento');
+
     await queryWithContext(usuario, (req) => {
       req.input('ConsultaId', sql.Int, consultaId);
       req.input('PacienteId', sql.Int, Number(usuario.id));
@@ -4807,6 +4820,8 @@ async decidirNoShowFisio(id, body, usuario) {
    * - Carteira (créditos): somente se saldo disponível >= ValorConsulta
    */
   async opcoesPagamento(id, usuario) {
+    assertOperationEnabled('contratacao');
+
     const consultaId = assertId(id, 'Id de consulta');
 
     requireUser(usuario);
@@ -4961,6 +4976,8 @@ async decidirNoShowFisio(id, body, usuario) {
    * Somente quando há vínculo ativo (isenção). Chama dbo.SP_Consulta_MarcarPagaForaPlataforma.
    */
   async marcarPagaForaPlataforma(id, usuario) {
+    assertOperationEnabled('contratacao');
+
     const consultaId = assertId(id, 'Id de consulta');
 
     requireUser(usuario);
@@ -4999,6 +5016,8 @@ async decidirNoShowFisio(id, body, usuario) {
    * Importante: esta SP deve consumir apenas dbo.CreditosPacientes com PacoteId IS NULL.
    */
   async pagarComCreditoCarteira(id, usuario) {
+    assertOperationEnabled('contratacao');
+
     const consultaId = assertId(id, 'Id de consulta');
 
     requireUser(usuario);
@@ -5042,6 +5061,8 @@ async decidirNoShowFisio(id, body, usuario) {
    * Usa SP: dbo.SP_Consulta_PagarComPacote
    */
   async pagarComPacote(id, dados, usuario) {
+    assertOperationEnabled('contratacao');
+
     const consultaId = assertId(id, 'id');
     requireUser(usuario);
 

@@ -5,6 +5,7 @@ import pagamentosGatewayController from '../controllers/pagamentosGatewayControl
 import { autenticarJWT, requireAuth } from '../middleware/authJWT.js';
 import { pagamentosWebhookLimiter } from '../middleware/apiLimiter.js';
 import verificarPermissao from '../middleware/verificarPermissao.js';
+import { requireNewContractsEnabled } from '../middleware/operationStatus.js';
 
 const router = express.Router();
 
@@ -32,6 +33,7 @@ router.post('/checkout',
   autenticarJWT,
   requireAuth,
   verificarPermissao(['Paciente']),
+  requireNewContractsEnabled,
   pagamentosGatewayController.criarCheckout
 );
 
@@ -40,6 +42,7 @@ router.post('/pacotes/checkout',
   autenticarJWT,
   requireAuth,
   verificarPermissao(['Paciente']),
+  requireNewContractsEnabled,
   pagamentosGatewayController.criarCheckoutPacote
 );
 
@@ -72,6 +75,7 @@ router.post('/confirmar-transacao',
   autenticarJWT,
   requireAuth,
   verificarPermissao(['Admin']),
+  requireNewContractsEnabled,
   pagamentosGatewayController.confirmarTransacaoPaga
 );
 

@@ -1,5 +1,6 @@
 import { sql } from '../config/dbConfig.js';
 import { queryWithContext } from '../services/_queryWithContext.js';
+import { getOperationStatus } from '../utils/operationStatus.js';
 
 const PARAM_NOME = 'ValorMinimoConsulta';
 const BANCOS_CACHE_MS = 12 * 60 * 60 * 1000;
@@ -53,6 +54,14 @@ async function carregarBancosBrasilApi() {
 }
 
 const parametrosSistemaController = {
+  obterOperacao(_req, res) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    return res.json({
+      sucesso: true,
+      operacao: getOperationStatus(process.env),
+    });
+  },
+
   async obterParametros(_req, res) {
     try {
       const result = await queryWithContext(

@@ -4,13 +4,14 @@ import pacientesController from '../controllers/pacientesController.js';
 import { autenticarJWT } from '../middleware/authJWT.js';
 import verificarPermissao from '../middleware/verificarPermissao.js';
 import { requireTrustedBff } from '../middleware/trustedBff.js';
+import { requireNewRegistrationsEnabled } from '../middleware/operationStatus.js';
 
 const router = express.Router();
 
 // Cadastro público
-router.post('/', pacientesController.criar);
-router.post('/social', requireTrustedBff, pacientesController.criarSocial);
-router.post('/ativar-pre-cadastro', pacientesController.ativarPreCadastro);
+router.post('/', requireNewRegistrationsEnabled, pacientesController.criar);
+router.post('/social', requireTrustedBff, requireNewRegistrationsEnabled, pacientesController.criarSocial);
+router.post('/ativar-pre-cadastro', requireNewRegistrationsEnabled, pacientesController.ativarPreCadastro);
 
 // A partir daqui, tudo exige autenticação (garante req.usuario)
 router.use(autenticarJWT);

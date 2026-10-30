@@ -15,6 +15,7 @@ import { HttpError } from '../utils/httpError.js';
 import { getContatoSecret } from '../utils/contactSecret.js';
 import { isValidCPF, isValidEmail, normalizeEmail } from '../utils/identityValidators.js';
 import { validatePasswordStrength } from '../utils/passwordPolicy.js';
+import { assertOperationEnabled } from '../utils/operationStatus.js';
 
 function toInt(v) {
   const n = Number(v);
@@ -328,6 +329,8 @@ export const pacientesService = {
 
   // Cadastro público
   async criar(dados) {
+    assertOperationEnabled('cadastro');
+
     try {
       const Nome = normStr(dados?.Nome, 300);
       const Email = normalizeEmail(normStr(dados?.Email, 300));
@@ -662,6 +665,8 @@ export const pacientesService = {
   },
 
   async criarSocial(dados, reqLike = null) {
+    assertOperationEnabled('cadastro');
+
     const oauthCadastroToken = dados?.oauthCadastroToken ?? dados?.OAuthCadastroToken ?? null;
     const oauthCadastro = authService.validarOAuthCadastroToken(oauthCadastroToken);
     if (!oauthCadastro) {
@@ -705,6 +710,8 @@ export const pacientesService = {
   },
 
   async ativarPreCadastro(payload = {}, reqLike = null) {
+    assertOperationEnabled('cadastro');
+
     const CPF = normalizeDigits(payload?.cpf ?? payload?.CPF);
     const Email = normalizeEmail(payload?.email ?? payload?.Email);
     const NovaSenha = String(payload?.novaSenha ?? payload?.NovaSenha ?? payload?.senha ?? payload?.Senha ?? '');

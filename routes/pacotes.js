@@ -3,6 +3,7 @@ import express from 'express';
 import pacotesController from '../controllers/pacotesController.js';
 import { autenticarJWT } from '../middleware/authJWT.js';
 import verificarPermissao from '../middleware/verificarPermissao.js';
+import { requireNewContractsEnabled } from '../middleware/operationStatus.js';
 
 const router = express.Router();
 
@@ -24,20 +25,30 @@ router.get('/', verificarPermissao(['Paciente']), pacotesController.listarMeus);
  * POST /api/pacotes/pre-compra/resumo
  * Body: { FisioterapeutaId, EspecialidadeId?, QuantidadeConsultas }
  */
-router.post('/pre-compra/resumo', verificarPermissao(['Paciente']), pacotesController.resumoPreCompra);
+router.post(
+  '/pre-compra/resumo',
+  verificarPermissao(['Paciente']),
+  requireNewContractsEnabled,
+  pacotesController.resumoPreCompra
+);
 
 /**
  * POST /api/pacotes/comprar
  * Body: { FisioterapeutaId, QuantidadeConsultas, Nome?, GatewayStatusSimulado? }
  */
-router.post('/comprar', verificarPermissao(['Paciente']), pacotesController.comprar);
+router.post('/comprar', verificarPermissao(['Paciente']), requireNewContractsEnabled, pacotesController.comprar);
 
 /**
  * POST /api/pacotes/:id/confirmar-pagamento
  * Body: { Gateway?, GatewayPaymentId?, GatewayStatus?, ValorPago? }
  * - Fluxo do paciente. Confirmações administrativas/gateway devem usar rota própria.
  */
-router.post('/:id/confirmar-pagamento', verificarPermissao(['Paciente']), pacotesController.confirmarPagamento);
+router.post(
+  '/:id/confirmar-pagamento',
+  verificarPermissao(['Paciente']),
+  requireNewContractsEnabled,
+  pacotesController.confirmarPagamento
+);
 
 /**
  * GET /api/pacotes/:id/opcoes-cancelamento

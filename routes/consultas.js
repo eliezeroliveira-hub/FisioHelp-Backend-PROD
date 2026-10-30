@@ -5,6 +5,10 @@ import { autenticarJWT, requireAuth } from '../middleware/authJWT.js';
 import verificarPermissao from '../middleware/verificarPermissao.js';
 import { uploadEvidenciaCheckin, validarMagicBytesEvidenciaCheckin } from '../middleware/uploadArquivos.js';
 import fileStorageProvider from '../providers/fileStorageProvider.js';
+import {
+  requireNewAppointmentsEnabled,
+  requireNewContractsEnabled,
+} from '../middleware/operationStatus.js';
 
 const router = express.Router();
 
@@ -46,12 +50,16 @@ router.get(
 router.post(
   '/pre-agendamento/opcoes-pagamento',
   verificarPermissao(['Paciente']),
+  requireNewAppointmentsEnabled,
+  requireNewContractsEnabled,
   consultasController.opcoesPagamentoPreAgendamento
 );
 
 router.post(
   '/agendar-com-pagamento',
   verificarPermissao(['Paciente']),
+  requireNewAppointmentsEnabled,
+  requireNewContractsEnabled,
   consultasController.criarEPagar
 );
 
@@ -59,6 +67,7 @@ router.post(
 router.post(
   '/',
   verificarPermissao(['Paciente']),
+  requireNewAppointmentsEnabled,
   consultasController.criar
 );
 
@@ -92,6 +101,7 @@ router.post(
 router.post(
   '/:id/reagendar',
   verificarPermissao(['Paciente']),
+  requireNewAppointmentsEnabled,
   consultasController.reagendar
 );
 
@@ -118,24 +128,28 @@ router.post(
 router.get(
   '/:id/opcoes-pagamento',
   verificarPermissao(['Paciente']),
+  requireNewContractsEnabled,
   consultasController.opcoesPagamento
 );
 
 router.post(
   '/:id/pagar-fora-plataforma',
   verificarPermissao(['Paciente']),
+  requireNewContractsEnabled,
   consultasController.marcarPagaForaPlataforma
 );
 
 router.post(
   '/:id/pagar-com-creditos',
   verificarPermissao(['Paciente']),
+  requireNewContractsEnabled,
   consultasController.pagarComCreditoCarteira
 );
 
 router.post(
   '/:id/pagar-com-pacote',
   verificarPermissao(['Paciente']),
+  requireNewContractsEnabled,
   consultasController.pagarComPacote
 );
 

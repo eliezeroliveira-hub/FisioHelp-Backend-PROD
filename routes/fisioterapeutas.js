@@ -5,6 +5,7 @@ import { autenticarJWT, requireAuth } from '../middleware/authJWT.js';
 import verificarPermissao from '../middleware/verificarPermissao.js';
 import uploadArquivos, { validarMagicBytesCertificados } from '../middleware/uploadArquivos.js';
 import uploadFotoPerfil, { validarMagicBytesFotoPerfil } from '../middleware/uploadFotoPerfil.js';
+import { requireNewRegistrationsEnabled } from '../middleware/operationStatus.js';
 
 // ⚠️ Você já criou o módulo /videos para vídeo bruto.
 // Então aqui NÃO deve existir upload de vídeo usando uploadArquivos (bloqueia video/*).
@@ -29,7 +30,7 @@ router.get('/perfil/:id', autenticarJWT, fisioterapeutasController.perfilPublico
 // 📅 Agenda (PACIENTE) — ver disponibilidade por data e calendário do mês
 router.get('/:id/disponibilidade', fisioterapeutasController.disponibilidadePorData);
 router.get('/:id/calendario', fisioterapeutasController.calendarioMensal);
-router.post('/', fisioterapeutasController.criar);
+router.post('/', requireNewRegistrationsEnabled, fisioterapeutasController.criar);
 
 // ==============================
 // 🔐 LOGADAS (FISIOTERAPEUTA)
@@ -95,6 +96,7 @@ router.post('/pacientes/pre-cadastro',
   autenticarJWT,
   requireAuth,
   verificarPermissao(['Fisioterapeuta']),
+  requireNewRegistrationsEnabled,
   fisioterapeutasController.preCadastrarPaciente
 );
 
