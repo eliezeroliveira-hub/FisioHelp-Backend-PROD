@@ -15,3 +15,4 @@ import './functions/enfileirarBeneficioBcmedFisioterapeuta.js';
 import './functions/enfileirarBeneficioJalecosConfortoFisioterapeuta.js';
 import './functions/enfileirarAtivacaoPrimeiraConsultaPaciente.js';
 import './functions/operarComunicadoEncerramentoOperacao.js';
+import './functions/operarProntuariosEncerramento.js';
